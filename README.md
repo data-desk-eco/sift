@@ -13,12 +13,22 @@ Or by hand: `brew install --HEAD data-desk-eco/tap/sift` — the qualified name 
 ## Quick start
 
 ```bash
-sift init                                          # one-time: vault + creds + model (~12 GB)
-sift "investigate Acme Corp in the Pandora Papers" # headless one-shot
-sift                                               # interactive REPL
+sift init                                                    # one-time: vault + creds + model (~12 GB)
+sift auto "investigate Acme Corp in the Pandora Papers"      # headless one-shot
+sift auto                                                    # interactive REPL
 ```
 
 In headless mode the agent appends to a `report.md` inside a per-run session directory in the vault, and prints a terse `[scope] message` log to your terminal. `--debug` dumps pi's full JSON event stream instead.
+
+The aleph tools the agent uses are also available to you directly:
+
+```bash
+sift search query="..." [collection=<id>]
+sift read alias=r5
+sift vault status
+```
+
+See `sift --help` for the full list, or `sift <cmd> --help` for per-command flags.
 
 ## Requirements
 

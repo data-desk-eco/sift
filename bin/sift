@@ -34,6 +34,11 @@ SIFT_PACKAGE="$(cd "$(dirname "$(/usr/bin/python3 -c 'import os,sys; print(os.pa
 SKILL="$SIFT_PACKAGE/share/aleph"
 AGENTS_MD="$SIFT_PACKAGE/share/AGENTS.md"
 
+# Every sift subcommand that talks to aleph (search, read, vault, …) needs
+# this so the bundled CLI finds the vault at $SIFT_HOME/.vault.sparseimage
+# instead of walking up from the caller's cwd.
+export ALEPH_PROJECT_DIR="$SIFT_HOME"
+
 log() { printf '%-9s %s\n' "[$1]" "$2"; }
 die() { log error "$1"; exit 1; }
 
@@ -147,7 +152,6 @@ cmd_init() {
   esac
 
   mkdir -p "$SIFT_HOME"
-  export ALEPH_PROJECT_DIR="$SIFT_HOME"
 
   if [[ ! -f "$SIFT_HOME/.vault.sparseimage" ]]; then
     log init "creating encrypted vault at $SIFT_HOME/.vault.sparseimage"
@@ -201,13 +205,34 @@ cmd_init() {
   log init "done — try: sift \"investigate <subject>\""
 }
 
-cmd_run() {
+cmd_auto() {
   ensure_initialized
   backend_start
   configure_pi
 
-  local prompt="$1"; shift
-  local pi_args=("$@")
+  local prompt=""
+  local debug=0
+  local pi_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --prompt)   prompt="${2:?--prompt requires a value}"; shift 2 ;;
+      --prompt=*) prompt="${1#--prompt=}"; shift ;;
+      --debug)    debug=1; shift ;;
+      -*)         pi_args+=("$1"); shift ;;
+      *)
+        if [[ -z "$prompt" ]]; then prompt="$1"; else pi_args+=("$1"); fi
+        shift ;;
+    esac
+  done
+
+  export PI_CODING_AGENT_DIR="$SIFT_HOME/pi"
+
+  if [[ -z "$prompt" ]]; then
+    # Interactive REPL — drop straight into pi.
+    exec "$SKILL/aleph" vault exec pi \
+      --append-system-prompt "$AGENTS_MD" \
+      --skill "$SKILL"
+  fi
 
   local slug
   slug=$(printf '%s' "$prompt" \
@@ -216,46 +241,36 @@ cmd_run() {
     | sed -E 's/-+/-/g; s/^-//; s/-$//' \
     | cut -c1-40)
   export ALEPH_SESSION="$(date +%Y%m%d-%H%M%S)${slug:+-$slug}"
-  export ALEPH_PROJECT_DIR="$SIFT_HOME"
-  export PI_CODING_AGENT_DIR="$SIFT_HOME/pi"
-  # Put the skill on PATH so the agent can invoke `aleph` directly.
-  export PATH="$SKILL:$PATH"
 
   set +e
   "$SKILL/aleph" vault exec pi \
     --append-system-prompt "$AGENTS_MD" \
     --skill "$SKILL" \
     -p --mode json "$prompt" ${pi_args[@]+"${pi_args[@]}"} \
-    | SIFT_DEBUG="$DEBUG" python3 -u "$SIFT_PACKAGE/bin/sift-log.py"
+    | SIFT_DEBUG="$debug" python3 -u "$SIFT_PACKAGE/bin/sift-log.py"
   local rc=${PIPESTATUS[0]}
   set -e
   exit "$rc"
-}
-
-cmd_repl() {
-  ensure_initialized
-  backend_start
-  configure_pi
-  export ALEPH_PROJECT_DIR="$SIFT_HOME"
-  export PI_CODING_AGENT_DIR="$SIFT_HOME/pi"
-  export PATH="$SKILL:$PATH"
-  exec "$SKILL/aleph" vault exec pi \
-    --append-system-prompt "$AGENTS_MD" \
-    --skill "$SKILL"
 }
 
 usage() {
   cat <<'EOF'
 sift — investigative research agent that runs entirely on your Mac.
 
-  sift init                       one-time setup (vault, creds, model)
-  sift "investigate Acme Corp..." headless one-shot
-  sift                            interactive REPL
-  sift --debug "..."              headless + raw JSON event stream
+Setup:
+  sift init                              one-time: vault, creds, model
 
-Each headless invocation gets its own session directory inside the
-encrypted vault at ~/.sift/.vault.sparseimage, so runs don't stomp on
-each other.
+Agent (headless or REPL):
+  sift auto "investigate Acme Corp..."   headless one-shot
+  sift auto                              interactive REPL
+  sift auto --debug "..."                + raw JSON event stream
+
+Aleph tools (also available to the agent):
+  sift search query="..." [type=...] [collection=...]
+  sift read   alias=r5
+  sift expand alias=r5
+  sift browse | tree | similar | hubs | sources    (see 'sift <cmd> --help')
+  sift vault status | unlock | lock | set | get | list
 
 Environment:
   SIFT_HOME     where the vault, model, and pi config live (default ~/.sift)
@@ -265,34 +280,20 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Arg parsing
+# Dispatch
 # ---------------------------------------------------------------------------
 
-PROMPT=""
-DEBUG=0
-PI_ARGS=()
-
-if [[ "${1:-}" == "init" ]]; then
-  shift
-  cmd_init "$@"
-  exit
-fi
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --prompt)   PROMPT="${2:?--prompt requires a value}"; shift 2 ;;
-    --prompt=*) PROMPT="${1#--prompt=}"; shift ;;
-    --debug)    DEBUG=1; shift ;;
-    --help|-h)  usage; exit 0 ;;
-    -*)         PI_ARGS+=("$1"); shift ;;
-    *)
-      if [[ -z "$PROMPT" ]]; then PROMPT="$1"; else PI_ARGS+=("$1"); fi
-      shift ;;
-  esac
-done
-
-if [[ -n "$PROMPT" ]]; then
-  cmd_run "$PROMPT" ${PI_ARGS[@]+"${PI_ARGS[@]}"}
-else
-  cmd_repl
-fi
+case "${1:-}" in
+  ""|--help|-h)
+    usage; exit 0 ;;
+  init)
+    shift; cmd_init "$@" ;;
+  auto)
+    shift; cmd_auto "$@" ;;
+  search|read|expand|browse|tree|similar|hubs|sources|vault)
+    # Forward to the bundled aleph CLI. ALEPH_PROJECT_DIR is exported at
+    # the top of this script, so the vault is found regardless of cwd.
+    exec "$SKILL/aleph" "$@" ;;
+  *)
+    die "unknown command: $1 (try 'sift --help')" ;;
+esac

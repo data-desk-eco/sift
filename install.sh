@@ -28,8 +28,9 @@ cat <<'EOF'
 
 sift installed. Next:
 
-  sift init                 # one-time: vault, Aleph credentials, model (~12GB)
-  sift "investigate ..."    # headless one-shot
-  sift                      # interactive REPL
+  sift init                       # one-time: vault, Aleph credentials, model (~12GB)
+  sift auto "investigate ..."     # headless one-shot
+  sift auto                       # interactive REPL
+  sift --help                     # full command list, including direct aleph tools
 
 EOF
