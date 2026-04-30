@@ -123,53 +123,8 @@ List Aleph collections visible to your API key.
 sift sources [grep=<term>] [limit=50]
 ```
 
-## Vault commands
-
-```
-sift vault init [size=20g]      # create the sparseimage, mount it, generate passphrase
-sift vault unlock                # Touch ID, then mount; idempotent
-sift vault lock                  # detach
-sift vault status                # mounted at <path> / locked / uninitialised
-sift vault mountpoint            # print the mount path; exit 1 if not mounted
-sift vault env                   # print export lines (ALEPH_*, VAULT_MOUNT)
-sift vault exec <cmd ...>        # auto-unlock, exec cmd with env populated
-sift vault set <KEY> <VALUE>     # write a secret to secrets.json
-sift vault get <KEY>             # read a secret
-sift vault list                  # list secret keys
-```
-
-The passphrase is generated randomly at `init` and stored at `~/.aleph/<hash>.passphrase` (mode 0600). Touch ID is the unlock-time UX gate. If you delete the passphrase file the vault is unrecoverable.
-
-## Investigation loop
-
-The natural pattern is **search → read → pivot**:
-
-1. `sift sources` to find a collection ID, or skip if the user has named one.
-2. `sift search query="<subject>" collection=<id>` to find first hits.
-3. `sift read alias=<top hit>` to pull the body.
-4. From the body, pick a name / company / reference. `search` on it.
-5. Or: `sift expand alias=<email>` to see who/what it's linked to.
-6. Or: `sift browse alias=<doc>` to see siblings in the same folder.
-7. Repeat. Aliases (`r1`, `r2`, …) accumulate; the session graph builds itself.
-
 ## Aleph quirks worth knowing
 
-- **`filter:schemata` is required** for property-filtered searches on Aleph Pro. The CLI adds it automatically when you use `emitter`/`recipient`/`mentions`.
 - **10,000 hit cap**: Aleph caps `offset + limit` at 10k. Beyond that, results are unreachable through pagination — narrow by collection or date range.
 - **Fuzzy queries time out** on large collections. Stick to literal terms.
-- **Linked-entity filters use the entity ID** (we pass aliases through automatically).
-- The cache key includes the full set of arguments, so changing `limit` or `offset` is a fresh request.
-
-## Output format
-
-Every research command emits an envelope:
-
-```
-[<command echo>]
-────────────────────────────────────────────────────────────
-<body>
-────────────────────────────────────────────────────────────
-Next: <suggested follow-up calls>
-```
-
-If the response was served from cache, the header gets a `(cached)` tag. Vault commands print plain text (mountpoint, key list, etc.) suitable for shell piping.
+- Responses are cached locally (keyed on the full argument set); a `(cached)` tag appears in the header when you see one. Pass `no_cache=true` to force a refetch.

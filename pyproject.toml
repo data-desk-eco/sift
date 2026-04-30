@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
     "requests>=2.31",
+    "tabulate>=0.9",
 ]
 
 [project.scripts]

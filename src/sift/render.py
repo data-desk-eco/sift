@@ -1,25 +1,30 @@
 """Render helpers — pure functions for shaping API responses into the
-terse `[header] / body / Next:` envelope sift commands emit, plus the
-small string utilities (label extraction, subject normalisation, email
-sender cleanup) used across commands."""
+terse `[header] / body` envelope sift commands emit, plus the small
+string utilities (label extraction, subject normalisation, email sender
+cleanup) used across commands."""
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Iterable
+
+from tabulate import tabulate
 
 RULE = "─" * 60
 DEFAULT_BODY_CHARS = 1500
 
 
-def envelope(header: str, body: str, next_actions: list[str] | None = None,
-             cached: bool = False) -> str:
+def envelope(header: str, body: str, cached: bool = False) -> str:
     tag = "  (cached)" if cached else ""
-    parts = [f"[{header}]{tag}", RULE, body.rstrip()]
-    if next_actions:
-        parts.append(RULE)
-        parts.append("Next: " + "  |  ".join(next_actions))
-    return "\n".join(parts)
+    return f"[{header}]{tag}\n{RULE}\n{body.rstrip()}"
+
+
+def table(rows: Iterable[Iterable[Any]], headers: list[str]) -> str:
+    """Render a borderless `simple` table — column-aligned, header
+    underlined with dashes, no other rules. Cleanest format for an LLM
+    to parse without ANSI noise."""
+    return tabulate(rows, headers=headers, tablefmt="simple",
+                    disable_numparse=True)
 
 
 def truncate(text: str, max_chars: int = DEFAULT_BODY_CHARS) -> str:
