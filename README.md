@@ -1,6 +1,6 @@
 # delve
 
-An investigative research agent that runs entirely on your Mac. Talks to an [OCCRP Aleph](https://aleph.occrp.org) instance, and uses a local Qwen3.6 35B A3B (served by [llama.cpp](https://github.com/ggml-org/llama.cpp)) as the brain. Credentials and research products live in an encrypted sparseimage; nothing leaves your machine except the Aleph API queries themselves.
+A self-contained investigative research agent for OCCRP [Aleph](https://aleph.occrp.org). Runs entirely on your Mac: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) drives the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness, which uses an [Aleph skill](share/aleph/SKILL.md) to search, read, and pivot through documents and entities. Credentials and findings live in an encrypted sparseimage at `~/.delve`. Nothing leaves your machine but the Aleph queries themselves.
 
 ## Install
 
@@ -8,64 +8,33 @@ An investigative research agent that runs entirely on your Mac. Talks to an [OCC
 curl -fsSL https://raw.githubusercontent.com/data-desk-eco/delve/main/install.sh | bash
 ```
 
-This installs Homebrew (if you don't have it), then `brew install`s the dependencies (`llama.cpp`, `node`, `uv`), the [`pi` agent harness](https://www.npmjs.com/package/@mariozechner/pi), and `delve` itself.
+Or by hand: `brew install --HEAD data-desk-eco/tap/delve` — the qualified name is necessary because `homebrew-core` already ships a `delve` formula for the Go debugger.
 
-If you'd rather install by hand:
-
-```bash
-brew install --HEAD data-desk-eco/tap/delve
-```
-
-(The qualified name is necessary — `homebrew-core` ships an unrelated `delve` formula for the Go debugger.)
-
-## Setup
+## Quick start
 
 ```bash
-delve init
+delve init                                          # one-time: vault + creds + model (~12 GB)
+delve "investigate Acme Corp in the Pandora Papers" # headless one-shot
+delve                                               # interactive REPL
 ```
 
-One-time. Creates an encrypted vault at `~/.delve/.vault.sparseimage`, prompts for your Aleph URL and API key (stored inside the vault), and downloads the default model (~12GB).
-
-## Use
-
-```bash
-delve "investigate Acme Corp's offshore exposure in the Pandora Papers"
-```
-
-Headless, one-shot. The agent works through the dataset and writes a `report.md` into a session directory inside the encrypted vault. The terminal shows a terse `[scope] message` log of what it's doing.
-
-```bash
-delve
-```
-
-Interactive REPL — drop into `pi` directly with the aleph skill loaded.
-
-```bash
-delve --debug "..."
-```
-
-Same as headless, but dumps the full pi event stream as raw JSON instead of the formatted log.
+In headless mode the agent appends to a `report.md` inside a per-run session directory in the vault, and prints a terse `[scope] message` log to your terminal. `--debug` dumps pi's full JSON event stream instead.
 
 ## Requirements
 
-- Apple Silicon Mac with at least 24 GB unified memory (the default model needs ~14 GB at runtime; `delve` will download ~12 GB on first init)
+- Apple Silicon Mac with **≥24 GB unified memory** (the default model uses ~14 GB at runtime)
 - macOS 13 or newer
 - An Aleph account with an API key
 
 ## Configuration
 
-Environment variables:
+Environment overrides:
 
-- `DELVE_HOME` — where the vault, model, and pi config live (default `~/.delve`)
-- `DELVE_BACKEND` — `llamacpp` (default) or `lmstudio`
-- `DELVE_PORT` — port the local LLM server listens on (default `1234`)
-
-## What's inside
-
-- [`bin/delve`](bin/delve) — the CLI
-- [`bin/delve-log.py`](bin/delve-log.py) — formats `pi`'s JSON event stream into a terse `[scope] message` log
-- [`share/aleph/`](share/aleph) — the [Aleph skill](share/aleph/SKILL.md): a Python CLI giving the agent search/read/expand/browse tools over an Aleph instance, plus a TouchID-gated encrypted-sparseimage vault
-- [`share/AGENTS.md`](share/AGENTS.md) — the system prompt appended for every session
+| | |
+|---|---|
+| `DELVE_HOME` | where the vault, model, and pi config live (default `~/.delve`) |
+| `DELVE_BACKEND` | `llamacpp` (default) or `lmstudio` |
+| `DELVE_PORT` | local LLM server port (default `1234`) |
 
 ## License
 
