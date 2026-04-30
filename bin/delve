@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+# delve — investigative research agent that runs entirely on your Mac.
+#
+# Talks to an OCCRP Aleph instance through Mario Zechner's `pi` agent
+# harness, with a local Qwen3.6 35B A3B served by llama.cpp. Credentials
+# and research products live in an encrypted sparseimage vault at
+# ~/.delve/.vault.sparseimage; nothing leaves your machine except the
+# Aleph API queries themselves.
+#
+#   delve init                       # one-time setup (vault, creds, model)
+#   delve "investigate Acme Corp..." # headless one-shot
+#   delve                            # interactive REPL
+#   delve --debug "..."              # headless + raw JSON event stream
+#
+# Each headless invocation gets its own session directory inside the
+# vault (timestamp + slug), so runs don't stomp on each other.
+
+set -euo pipefail
+
+DELVE_HOME="${DELVE_HOME:-$HOME/.delve}"
+DELVE_BACKEND="${DELVE_BACKEND:-llamacpp}"
+DELVE_PORT="${DELVE_PORT:-1234}"
+
+# Default model — Qwen3.6 35B A3B (MoE; ~3B active), unsloth UD-Q2_K_XL
+# quant. ~12.3 GB on disk, comfortable on a 24 GB Mac alongside a 32k
+# context window.
+DEFAULT_MODEL_REPO="unsloth/Qwen3.6-35B-A3B-GGUF"
+DEFAULT_MODEL_FILE="Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
+DEFAULT_MODEL_NAME="qwen3.6-35b-a3b"
+
+# Resolve where the package lives (Homebrew installs to libexec; binary is
+# symlinked into bin/). realpath -> .../libexec/bin/delve -> .../libexec.
+DELVE_PACKAGE="$(cd "$(dirname "$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")")/.." && pwd)"
+SKILL="$DELVE_PACKAGE/share/aleph"
+AGENTS_MD="$DELVE_PACKAGE/share/AGENTS.md"
+
+log() { printf '%-9s %s\n' "[$1]" "$2"; }
+die() { log error "$1"; exit 1; }
+
+require() {
+  command -v "$1" >/dev/null 2>&1 \
+    || die "missing dependency: $1${2:+  (install: $2)}"
+}
+
+ensure_initialized() {
+  [[ -f "$DELVE_HOME/.initialized" ]] \
+    || die "delve isn't set up yet — run 'delve init' first"
+}
+
+# ---------------------------------------------------------------------------
+# Backend (local LLM server)
+# ---------------------------------------------------------------------------
+
+backend_health() {
+  curl -sf "http://127.0.0.1:$DELVE_PORT/v1/models" >/dev/null 2>&1
+}
+
+backend_start_llamacpp() {
+  if backend_health; then
+    log server "llama-server already up on :$DELVE_PORT"
+    return
+  fi
+  local model_path="$DELVE_HOME/models/$DEFAULT_MODEL_FILE"
+  [[ -f "$model_path" ]] || die "model not found at $model_path — run 'delve init'"
+  log server "starting llama-server on :$DELVE_PORT (logs: $DELVE_HOME/llama-server.log)"
+  nohup llama-server \
+    --model "$model_path" \
+    --host 127.0.0.1 \
+    --port "$DELVE_PORT" \
+    --jinja \
+    --no-webui \
+    --ctx-size 32768 \
+    --alias "$DEFAULT_MODEL_NAME" \
+    >"$DELVE_HOME/llama-server.log" 2>&1 &
+  echo $! >"$DELVE_HOME/llama-server.pid"
+  for _ in $(seq 1 120); do
+    sleep 1
+    backend_health && { log server "ready"; return; }
+  done
+  die "llama-server didn't become ready in 120s — check $DELVE_HOME/llama-server.log"
+}
+
+backend_start_lmstudio() {
+  require lms "https://lmstudio.ai/"
+  local server_msg port
+  server_msg=$(lms server start 2>&1 || true)
+  port=$(printf '%s' "$server_msg" | grep -oE 'port [0-9]+' | head -n1 | awk '{print $2}')
+  if [[ -n "$port" ]]; then
+    DELVE_PORT="$port"
+    log server "running on :$port"
+  else
+    log server "$server_msg"
+  fi
+}
+
+backend_start() {
+  case "$DELVE_BACKEND" in
+    llamacpp) backend_start_llamacpp ;;
+    lmstudio) backend_start_lmstudio ;;
+    *) die "unknown DELVE_BACKEND: $DELVE_BACKEND (expected llamacpp or lmstudio)" ;;
+  esac
+}
+
+# Write pi's provider config so it talks to whichever backend is running.
+# Idempotent — overwritten every run so the port stays in sync.
+configure_pi() {
+  mkdir -p "$DELVE_HOME/pi"
+  cat >"$DELVE_HOME/pi/models.json" <<JSON
+{
+  "providers": {
+    "delve": {
+      "baseUrl": "http://127.0.0.1:$DELVE_PORT/v1",
+      "api": "openai-completions",
+      "apiKey": "delve-local",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {"id": "$DEFAULT_MODEL_NAME", "name": "Qwen3.6 35B A3B"}
+      ]
+    }
+  }
+}
+JSON
+  cat >"$DELVE_HOME/pi/settings.json" <<JSON
+{
+  "defaultProvider": "delve",
+  "defaultModel": "$DEFAULT_MODEL_NAME"
+}
+JSON
+}
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+cmd_init() {
+  log init "checking dependencies"
+  require uv     "brew install uv"
+  require pi     "npm install -g @mariozechner/pi"
+  require swiftc "xcode-select --install"
+  case "$DELVE_BACKEND" in
+    llamacpp) require llama-server "brew install llama.cpp" ;;
+    lmstudio) require lms          "https://lmstudio.ai/" ;;
+  esac
+
+  mkdir -p "$DELVE_HOME"
+  export ALEPH_PROJECT_DIR="$DELVE_HOME"
+
+  if [[ ! -f "$DELVE_HOME/.vault.sparseimage" ]]; then
+    log init "creating encrypted vault at $DELVE_HOME/.vault.sparseimage"
+    "$SKILL/aleph" vault init >/dev/null
+  else
+    log init "vault already exists"
+  fi
+  "$SKILL/aleph" vault unlock >/dev/null
+
+  log init "configuring Aleph credentials"
+  printf 'Aleph URL [https://aleph.occrp.org]: '
+  read -r aleph_url
+  aleph_url="${aleph_url:-https://aleph.occrp.org}"
+  printf 'Aleph API key (input hidden): '
+  stty -echo
+  read -r aleph_key
+  stty echo
+  printf '\n'
+  [[ -n "$aleph_key" ]] || die "API key required"
+  "$SKILL/aleph" vault set ALEPH_URL     "$aleph_url" >/dev/null
+  "$SKILL/aleph" vault set ALEPH_API_KEY "$aleph_key" >/dev/null
+
+  if [[ "$DELVE_BACKEND" == "llamacpp" ]]; then
+    mkdir -p "$DELVE_HOME/models"
+    local model_path="$DELVE_HOME/models/$DEFAULT_MODEL_FILE"
+    if [[ ! -f "$model_path" ]]; then
+      log init "downloading model (~12GB) — go get a coffee"
+      curl -L --fail --progress-bar \
+        -o "$model_path.partial" \
+        "https://huggingface.co/$DEFAULT_MODEL_REPO/resolve/main/$DEFAULT_MODEL_FILE"
+      mv "$model_path.partial" "$model_path"
+    else
+      log init "model already downloaded"
+    fi
+  fi
+
+  touch "$DELVE_HOME/.initialized"
+  log init "done — try: delve \"investigate <subject>\""
+}
+
+cmd_run() {
+  ensure_initialized
+  backend_start
+  configure_pi
+
+  local prompt="$1"; shift
+  local pi_args=("$@")
+
+  local slug
+  slug=$(printf '%s' "$prompt" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr -c 'a-z0-9' '-' \
+    | sed -E 's/-+/-/g; s/^-//; s/-$//' \
+    | cut -c1-40)
+  export ALEPH_SESSION="$(date +%Y%m%d-%H%M%S)${slug:+-$slug}"
+  export ALEPH_PROJECT_DIR="$DELVE_HOME"
+  export PI_CODING_AGENT_DIR="$DELVE_HOME/pi"
+
+  set +e
+  "$SKILL/aleph" vault exec pi \
+    --append-system-prompt "$AGENTS_MD" \
+    --skill "$SKILL" \
+    -p --mode json "$prompt" ${pi_args[@]+"${pi_args[@]}"} \
+    | DELVE_DEBUG="$DEBUG" python3 -u "$DELVE_PACKAGE/bin/delve-log.py"
+  local rc=${PIPESTATUS[0]}
+  set -e
+  exit "$rc"
+}
+
+cmd_repl() {
+  ensure_initialized
+  backend_start
+  configure_pi
+  export ALEPH_PROJECT_DIR="$DELVE_HOME"
+  export PI_CODING_AGENT_DIR="$DELVE_HOME/pi"
+  exec "$SKILL/aleph" vault exec pi \
+    --append-system-prompt "$AGENTS_MD" \
+    --skill "$SKILL"
+}
+
+usage() {
+  cat <<'EOF'
+delve — investigative research agent that runs entirely on your Mac.
+
+  delve init                       one-time setup (vault, creds, model)
+  delve "investigate Acme Corp..." headless one-shot
+  delve                            interactive REPL
+  delve --debug "..."              headless + raw JSON event stream
+
+Each headless invocation gets its own session directory inside the
+encrypted vault at ~/.delve/.vault.sparseimage, so runs don't stomp on
+each other.
+
+Environment:
+  DELVE_HOME     where the vault, model, and pi config live (default ~/.delve)
+  DELVE_BACKEND  llamacpp (default) or lmstudio
+  DELVE_PORT     local LLM server port (default 1234)
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Arg parsing
+# ---------------------------------------------------------------------------
+
+PROMPT=""
+DEBUG=0
+PI_ARGS=()
+
+if [[ "${1:-}" == "init" ]]; then
+  shift
+  cmd_init "$@"
+  exit
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prompt)   PROMPT="${2:?--prompt requires a value}"; shift 2 ;;
+    --prompt=*) PROMPT="${1#--prompt=}"; shift ;;
+    --debug)    DEBUG=1; shift ;;
+    --help|-h)  usage; exit 0 ;;
+    -*)         PI_ARGS+=("$1"); shift ;;
+    *)
+      if [[ -z "$PROMPT" ]]; then PROMPT="$1"; else PI_ARGS+=("$1"); fi
+      shift ;;
+  esac
+done
+
+if [[ -n "$PROMPT" ]]; then
+  cmd_run "$PROMPT" ${PI_ARGS[@]+"${PI_ARGS[@]}"}
+else
+  cmd_repl
+fi
