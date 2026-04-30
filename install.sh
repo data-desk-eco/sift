@@ -20,8 +20,9 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 echo "Installing delve from data-desk-eco/tap..."
-brew tap data-desk-eco/tap
-brew install delve
+# Qualified name avoids a collision with homebrew-core's `delve` (the Go
+# debugger). --HEAD until v0.1.0 is tagged with a real tarball sha256.
+brew install --HEAD data-desk-eco/tap/delve
 
 cat <<'EOF'
 

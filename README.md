@@ -10,6 +10,14 @@ curl -fsSL https://raw.githubusercontent.com/data-desk-eco/delve/main/install.sh
 
 This installs Homebrew (if you don't have it), then `brew install`s the dependencies (`llama.cpp`, `node`, `uv`), the [`pi` agent harness](https://www.npmjs.com/package/@mariozechner/pi), and `delve` itself.
 
+If you'd rather install by hand:
+
+```bash
+brew install --HEAD data-desk-eco/tap/delve
+```
+
+(The qualified name is necessary — `homebrew-core` ships an unrelated `delve` formula for the Go debugger.)
+
 ## Setup
 
 ```bash
