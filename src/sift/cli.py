@@ -283,13 +283,11 @@ def _session_name(prompt: str) -> str:
 
 
 def _skill_dir() -> Path:
-    """The directory pi's --skill points at. Package data is read-only on
-    disk after install but pi only reads it, so we hand it the package
-    path directly via importlib.resources."""
-    # `as_file` returns a context manager normally; for a dir on a real
-    # filesystem (the uv tool install case) `files()` already yields a
-    # Path-like, so str-cast is enough.
-    return Path(str(DATA_DIR))
+    """The directory pi's --skill points at. Has to contain SKILL.md and
+    nothing else pi might mistake for a second skill — that's why we
+    isolate it under data/skill/ rather than handing pi the whole data dir
+    (where AGENTS.md and touchid.swift would also live)."""
+    return Path(str(DATA_DIR / "skill"))
 
 
 def _build_system_prompt() -> Path:
