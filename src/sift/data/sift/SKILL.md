@@ -32,7 +32,7 @@ Aleph entity IDs are 64-char hashes. The CLI assigns short aliases (`r1`, `r2`, 
 
 ## Research tools
 
-All commands take `key=value` style arguments (also `--key value` works).
+All commands take `key=value` style arguments. `--key=value` and `--key value` also work, and a few short flags are recognised: `-f`/`--full`, `-r`/`--raw`, `-l`/`--limit N`, `-q`/`--query Q`, `-o`/`--offset N`. Anything else (e.g. `-c`, `--collecton`) is rejected — use the documented kwarg name instead.
 
 ### `search`
 

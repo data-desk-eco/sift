@@ -47,6 +47,27 @@ DATA_DIR = files("sift") / "data"
 
 BOOL_KEYS = {"full", "raw", "no_cache"}
 
+# Single-dash shortcuts the agent reaches for instinctively. Mapped to the
+# canonical key=value name documented in SKILL.md.
+SHORT_FLAG_ALIASES = {
+    "f": "full",
+    "r": "raw",
+    "l": "limit",
+    "q": "query",
+    "o": "offset",
+}
+
+# Every kwarg any research/cache command accepts. Used to reject `--typo` and
+# `-x` flags up front instead of silently routing them into `query`/`alias`,
+# which produces baffling 404s like `sift read -f r5` did before.
+KNOWN_KEYS = {
+    "query", "type", "limit", "offset", "collection", "sort", "no_cache",
+    "emitter", "recipient", "mentions", "date_from", "date_to",
+    "alias", "full", "raw",
+    "grep", "schema", "property", "direction", "depth", "max_siblings",
+    "older_than_days",
+}
+
 
 def make_vault() -> Vault:
     project_dir = Path(
@@ -90,22 +111,49 @@ def session_db_path() -> Path:
 
 
 def parse_kv_args(raw: list[str]) -> dict:
-    """Accept both `key=value` and `--key value` / `--key=value`."""
+    """Accept `key=value`, `--key=value`, `--key value`, and a small set of
+    short flags (`-f`, `-l N`, `-q Q`, …). Unknown flags raise so typos
+    surface immediately instead of being smuggled into positional args."""
     out: dict[str, Any] = {}
     i = 0
     while i < len(raw):
         token = raw[i]
         if token.startswith("--"):
-            body = token[2:]
+            body = token[2:].replace("-", "_")
             if "=" in body:
                 k, v = body.split("=", 1)
+            elif body in BOOL_KEYS:
+                k, v = body, "true"
+            elif i + 1 < len(raw) and not raw[i + 1].startswith("-"):
+                k, v = body, raw[i + 1]
+                i += 1
             else:
-                k = body
-                if i + 1 < len(raw) and not raw[i + 1].startswith("--"):
-                    v = raw[i + 1]
-                    i += 1
-                else:
-                    v = "true"
+                k, v = body, "true"
+            if k not in KNOWN_KEYS:
+                raise CommandError(
+                    f"unknown flag '--{k}'",
+                    "use key=value syntax; see SKILL.md for accepted args",
+                )
+            out[k] = v
+        elif (token.startswith("-") and len(token) > 1
+              and not token[1].isdigit() and "=" not in token):
+            short = token[1:]
+            if short not in SHORT_FLAG_ALIASES:
+                raise CommandError(
+                    f"unknown flag '-{short}'",
+                    "use key=value syntax; see SKILL.md for accepted args",
+                )
+            k = SHORT_FLAG_ALIASES[short]
+            if k in BOOL_KEYS:
+                v = "true"
+            elif i + 1 < len(raw) and not raw[i + 1].startswith("-"):
+                v = raw[i + 1]
+                i += 1
+            else:
+                raise CommandError(
+                    f"-{short} ({k}) requires a value",
+                    f"e.g. -{short} 10 or {k}=10",
+                )
             out[k] = v
         elif "=" in token:
             k, v = token.split("=", 1)
@@ -297,6 +345,15 @@ def _session_name(prompt: str) -> str:
     return f"{ts}-{slug}" if slug else ts
 
 
+def _strip_frontmatter(text: str) -> str:
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text
+    return text[end + 4:].lstrip("\n")
+
+
 def _skill_dir() -> Path:
     """The directory pi's --skill points at. pi requires the directory
     name to match the skill name (i.e. `sift`), and to contain only
@@ -306,13 +363,17 @@ def _skill_dir() -> Path:
 
 
 def _build_system_prompt(deadline: tuple[int, int] | None = None) -> Path:
-    """Combine AGENTS.md + any project.md into a single sysprompt file.
+    """Combine AGENTS.md + SKILL.md + any project.md into a single sysprompt
+    file. SKILL.md is also exposed via pi's `--skill` flag for discoverability,
+    but baking it into turn 1 ensures the agent never reaches for argparse-style
+    flags the CLI doesn't accept (it used to silently smuggle `-f` into `alias`).
 
     If `deadline` is set (start_ts, end_ts), append a soft-deadline note so
     the agent knows to call `sift time` and self-pace."""
     agents_md = (DATA_DIR / "AGENTS.md").read_text()
+    skill_md = _strip_frontmatter((DATA_DIR / "sift" / "SKILL.md").read_text())
     project_path = SIFT_HOME / "project.md"
-    parts = [agents_md]
+    parts = [agents_md, "\n\n", skill_md]
     if project_path.exists():
         parts.append("\n\n## Project context\n\n" + project_path.read_text())
     if deadline:
