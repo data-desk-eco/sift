@@ -10,9 +10,9 @@ API credentials and any research products you produce alongside.
 
 Two command groups:
 
-  aleph search|read|expand|browse|tree|similar|hubs|sources [args]
+  sift search|read|expand|browse|tree|similar|hubs|sources [args]
                           # Aleph API tools — see SKILL.md
-  aleph vault <subcmd>    # vault management — init/unlock/lock/status/env/
+  sift vault <subcmd>    # vault management — init/unlock/lock/status/env/
                           # mountpoint/exec/set/get/list
 
 Configuration is via environment, with auto-discovery from the local vault
@@ -655,7 +655,7 @@ class Vault:
         if not self.passphrase_file.exists():
             raise CommandError(
                 f"vault passphrase not found at {self.passphrase_file}",
-                "run 'aleph vault init' first",
+                "run 'sift vault init' first",
             )
         import base64
         raw = self.passphrase_file.read_bytes().strip()
@@ -697,7 +697,7 @@ class Vault:
         if self.sparseimage.exists():
             raise CommandError(
                 f"vault already exists at {self.sparseimage}",
-                "use 'aleph vault unlock' to mount",
+                "use 'sift vault unlock' to mount",
             )
         passphrase = self._random_passphrase()
         self._save_passphrase(passphrase)
@@ -736,7 +736,7 @@ class Vault:
         if not self.sparseimage.exists():
             raise CommandError(
                 "vault not initialised",
-                "run 'aleph vault init' first",
+                "run 'sift vault init' first",
             )
         self._confirm_touchid()
         passphrase = self._load_passphrase()
@@ -1748,7 +1748,7 @@ def find_project_dir() -> Path:
     Resolution order:
       1. $ALEPH_PROJECT_DIR (explicit override)
       2. Walk up from cwd looking for an existing .vault.sparseimage
-      3. Fall back to cwd (used by `aleph vault init` to create a new vault)
+      3. Fall back to cwd (used by `sift vault init` to create a new vault)
     """
     override = os.environ.get("ALEPH_PROJECT_DIR")
     if override:
@@ -1795,13 +1795,13 @@ def make_client() -> AlephClient:
     if not base:
         raise CommandError(
             "ALEPH_URL is not set",
-            "set it in the vault: 'aleph vault set ALEPH_URL https://aleph.occrp.org', "
+            "set it in the vault: 'sift vault set ALEPH_URL https://aleph.occrp.org', "
             "or export it",
         )
     if not key:
         raise CommandError(
             "ALEPH_API_KEY is not set",
-            "set it in the vault: 'aleph vault set ALEPH_API_KEY <key>', or export it",
+            "set it in the vault: 'sift vault set ALEPH_API_KEY <key>', or export it",
         )
     return AlephClient(base_url=base, api_key=key)
 
@@ -1822,8 +1822,8 @@ def vault_init(vault: Vault, args: list[str]) -> str:
         f"  mounted at  : {mp}\n"
         f"  passphrase  : {vault.passphrase_file} (mode 0600)\n\n"
         f"Add your Aleph credentials:\n"
-        f"  aleph vault set ALEPH_URL https://aleph.occrp.org\n"
-        f"  aleph vault set ALEPH_API_KEY <your-key>"
+        f"  sift vault set ALEPH_URL https://aleph.occrp.org\n"
+        f"  sift vault set ALEPH_API_KEY <your-key>"
     )
 
 
@@ -1838,7 +1838,7 @@ def vault_lock(vault: Vault, args: list[str]) -> str:
 def vault_status(vault: Vault, args: list[str]) -> str:
     if not vault.sparseimage.exists():
         # Communicate via stderr-equivalent: we still return a string but exit code 1
-        raise CommandError("uninitialised", f"run 'aleph vault init' to create {vault.sparseimage}")
+        raise CommandError("uninitialised", f"run 'sift vault init' to create {vault.sparseimage}")
     mp = vault.find_mount()
     return f"mounted at {mp}" if mp else "locked"
 
@@ -1846,14 +1846,14 @@ def vault_status(vault: Vault, args: list[str]) -> str:
 def vault_mountpoint(vault: Vault, args: list[str]) -> str:
     mp = vault.find_mount()
     if not mp:
-        raise CommandError("vault is not mounted", "run 'aleph vault unlock'")
+        raise CommandError("vault is not mounted", "run 'sift vault unlock'")
     return str(mp)
 
 
 def vault_env(vault: Vault, args: list[str]) -> str:
     mp = vault.find_mount()
     if not mp:
-        raise CommandError("vault is not mounted", "run 'aleph vault unlock'")
+        raise CommandError("vault is not mounted", "run 'sift vault unlock'")
     env = vault.env_dict(mp)
     if "ALEPH_SESSION" not in os.environ:
         env["ALEPH_SESSION"] = "default"
@@ -1879,20 +1879,20 @@ def vault_exec(vault: Vault, args: list[str]) -> str:
 
 def vault_set(vault: Vault, args: list[str]) -> str:
     if len(args) != 2:
-        raise CommandError("vault set: usage 'aleph vault set <KEY> <VALUE>'")
+        raise CommandError("vault set: usage 'sift vault set <KEY> <VALUE>'")
     mp = vault.find_mount()
     if not mp:
-        raise CommandError("vault is not mounted", "run 'aleph vault unlock'")
+        raise CommandError("vault is not mounted", "run 'sift vault unlock'")
     vault.write_secret(mp, args[0], args[1])
     return f"set {args[0]}"
 
 
 def vault_get(vault: Vault, args: list[str]) -> str:
     if len(args) != 1:
-        raise CommandError("vault get: usage 'aleph vault get <KEY>'")
+        raise CommandError("vault get: usage 'sift vault get <KEY>'")
     mp = vault.find_mount()
     if not mp:
-        raise CommandError("vault is not mounted", "run 'aleph vault unlock'")
+        raise CommandError("vault is not mounted", "run 'sift vault unlock'")
     secrets = vault.read_secrets(mp)
     if args[0] not in secrets:
         raise CommandError(f"no secret named '{args[0]}'")
@@ -1902,7 +1902,7 @@ def vault_get(vault: Vault, args: list[str]) -> str:
 def vault_list(vault: Vault, args: list[str]) -> str:
     mp = vault.find_mount()
     if not mp:
-        raise CommandError("vault is not mounted", "run 'aleph vault unlock'")
+        raise CommandError("vault is not mounted", "run 'sift vault unlock'")
     keys = vault.list_secrets(mp)
     return "\n".join(keys) if keys else "(empty)"
 
@@ -1926,7 +1926,7 @@ VAULT_SUBCMDS = {
 def usage() -> str:
     return (
         "usage: aleph <tool> [key=value ...]\n"
-        "       aleph vault <subcmd> [args ...]\n\n"
+        "       sift vault <subcmd> [args ...]\n\n"
         f"tools: {', '.join(TOOLS.keys())}\n"
         f"vault: {', '.join(sorted(set(VAULT_SUBCMDS.keys())))}\n\n"
         "config (env, with vault auto-discovery):\n"
@@ -1976,7 +1976,7 @@ def main() -> int:
         return 2
 
     args = parse_kv_args(sys.argv[2:])
-    # First positional (e.g. `aleph search "louis goddard"`) → query.
+    # First positional (e.g. `sift search "louis goddard"`) → query.
     pos = args.pop("_positional", None)
     if pos and "query" not in args and tool in ("search", "hubs"):
         args["query"] = " ".join(pos)
