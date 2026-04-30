@@ -26,11 +26,13 @@ import click
 from . import backend as _backend
 from .client import AlephClient
 from .commands import (
-    cmd_browse, cmd_expand, cmd_hubs, cmd_read, cmd_search,
-    cmd_similar, cmd_sources, cmd_tree,
+    cmd_browse, cmd_cache_clear, cmd_cache_stats, cmd_expand, cmd_hubs,
+    cmd_neighbors, cmd_read, cmd_recall, cmd_search, cmd_similar,
+    cmd_sources, cmd_sql, cmd_tree,
 )
 from .errors import CommandError
 from .log_filter import stream as log_stream
+from .report import export_report
 from .store import Store
 from .vault import Vault
 
@@ -522,6 +524,14 @@ TOOLS = {
     "tree": cmd_tree,
 }
 
+# Local-only commands operate purely against the cache DB — no Aleph
+# round-trip, no client construction, no vault unlock required.
+LOCAL_TOOLS = {
+    "neighbors": cmd_neighbors,
+    "recall": cmd_recall,
+    "sql": cmd_sql,
+}
+
 
 def _make_research_command(name: str):
     @click.pass_context
@@ -546,6 +556,24 @@ def _make_research_command(name: str):
     return _cmd
 
 
+def _make_local_command(name: str):
+    @click.pass_context
+    def _cmd(ctx: click.Context) -> None:
+        args = parse_kv_args(ctx.args)
+        pos = args.pop("_positional", None)
+        if pos and "alias" not in args and name == "neighbors":
+            args["alias"] = pos[0]
+        elif pos and "query" not in args and name == "sql":
+            args["query"] = " ".join(pos)
+
+        store = Store(session_db_path())
+        out = LOCAL_TOOLS[name](store, args)
+        click.echo(out)
+
+    _cmd.__name__ = name
+    return _cmd
+
+
 for _name in TOOLS:
     cli.command(
         _name,
@@ -553,6 +581,79 @@ for _name in TOOLS:
                           "allow_extra_args": True},
         help=f"Aleph: {_name} (key=value args; see SKILL.md)",
     )(_make_research_command(_name))
+
+
+for _name in LOCAL_TOOLS:
+    cli.command(
+        _name,
+        context_settings={"ignore_unknown_options": True,
+                          "allow_extra_args": True},
+        help=f"Cache: {_name} (key=value args; see SKILL.md)",
+    )(_make_local_command(_name))
+
+
+# ---------------------------------------------------------------------------
+# cache subgroup — stats and clear
+# ---------------------------------------------------------------------------
+
+@cli.group("cache", invoke_without_command=True)
+@click.pass_context
+def cache_group(ctx: click.Context) -> None:
+    """Inspect or prune the local response cache."""
+    if ctx.invoked_subcommand is None:
+        store = Store(session_db_path())
+        click.echo(cmd_cache_stats(store, {}))
+
+
+@cache_group.command("stats")
+def cache_stats_cmd() -> None:
+    """Show cache size, counts, and age."""
+    store = Store(session_db_path())
+    click.echo(cmd_cache_stats(store, {}))
+
+
+@cache_group.command("clear", context_settings={"ignore_unknown_options": True,
+                                                 "allow_extra_args": True})
+@click.pass_context
+def cache_clear_cmd(ctx: click.Context) -> None:
+    """Truncate the response cache (entities/aliases/edges preserved)."""
+    args = parse_kv_args(ctx.args)
+    store = Store(session_db_path())
+    click.echo(cmd_cache_clear(store, args))
+
+
+# ---------------------------------------------------------------------------
+# export — markdown report → HTML, alias refs → Aleph entity links
+# ---------------------------------------------------------------------------
+
+@cli.command("export")
+@click.argument("src", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                default=Path("report.md"), required=False)
+@click.option("--out", "-o", "dst", type=click.Path(dir_okay=False, path_type=Path),
+              default=None, help="output file (default: SRC with .html extension)")
+@click.option("--server", default=None,
+              help="Aleph base URL for entity links (default: ALEPH_URL from vault)")
+def export_cmd(src: Path, dst: Path | None, server: str | None) -> None:
+    """Render report.md → report.html, turning every r-alias into a proper
+    link to the entity on its Aleph server."""
+    if dst is None:
+        dst = src.with_suffix(".html")
+
+    if not server:
+        server = os.environ.get("ALEPH_URL")
+        if not server:
+            vault = make_vault()
+            mp = vault.find_mount()
+            if mp:
+                server = (vault.read_secrets(mp) or {}).get("ALEPH_URL")
+
+    store = Store(session_db_path())
+    counts = export_report(src, dst, store, default_server=server)
+    msg = f"[export]   {src} → {dst}  ({counts.linked} aliases linked"
+    if counts.unresolved:
+        msg += f", {counts.unresolved} unresolved"
+    msg += ")"
+    click.echo(msg)
 
 
 # ---------------------------------------------------------------------------

@@ -1,12 +1,14 @@
 """Research-tool implementations: search, read, sources, hubs, similar,
-expand, browse, tree. Each command takes (client, store, args) and
-returns a formatted envelope string. Cohesive enough to keep in one
-file — the cmd_* functions all share the cache-key / call / render
-shape, and they share the small subtree/format helpers below."""
+expand, browse, tree (network-bound, take a client) plus neighbors,
+recall, cache stats/clear, sql (local-only, read against the cache
+DB). Each network command takes (client, store, args); each local
+command takes (store, args). All return a formatted envelope string."""
 
 from __future__ import annotations
 
 import json
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .client import AlephClient
@@ -830,3 +832,314 @@ def _render_subtree_ascii(
         lines.append("")
         lines.append("warn: subtree exceeds scan cap — counts and deep branches may be incomplete")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Local-only commands — read against the cache DB without hitting Aleph.
+# ---------------------------------------------------------------------------
+
+
+def _label_for(store: Store, eid: str) -> tuple[str, str, str]:
+    """Return (alias_or_dash, schema_or_dash, display_name) for an entity id
+    we may or may not have ingested yet."""
+    alias = store.alias_for(eid) or "-"
+    stub = store.get_entity(eid) or {}
+    schema = stub.get("schema") or "?"
+    name = stub.get("name") or stub.get("caption") or eid[:10]
+    return alias, schema, name
+
+
+def cmd_neighbors(store: Store, args: dict) -> str:
+    """Show every cached edge touching an entity, grouped by property.
+    No round-trip — pure local lookup against the edges table."""
+    alias = args.get("alias")
+    if not alias:
+        raise CommandError("neighbors requires an alias", "pass alias=r5")
+    direction = (args.get("direction") or "both").lower()
+    if direction not in ("out", "in", "both"):
+        raise CommandError(
+            f"unknown direction '{direction}'",
+            "use direction=out, direction=in, or direction=both",
+        )
+    prop_filter = args.get("property")
+    limit = max(1, int(args.get("limit") or 50))
+
+    eid = store.resolve_alias(alias)
+    self_alias, self_schema, self_name = _label_for(store, eid)
+
+    out: list[str] = [f"{self_alias} {self_schema}  {short(self_name, 60)}"]
+
+    def render_block(title: str, rows: list[tuple], headers: list[str]) -> None:
+        if not rows:
+            return
+        out.append("")
+        out.append(f"## {title}")
+        out.append(table(rows, headers=headers))
+
+    if direction in ("out", "both"):
+        sql = ("SELECT prop, dst_id FROM edges WHERE src_id=?"
+               + (" AND prop=?" if prop_filter else "")
+               + " ORDER BY prop, dst_id")
+        params: tuple = (eid, prop_filter) if prop_filter else (eid,)
+        rows = []
+        truncated = 0
+        per_prop: dict[str, int] = {}
+        for r in store.conn.execute(sql, params):
+            prop = r["prop"]
+            per_prop[prop] = per_prop.get(prop, 0) + 1
+            if per_prop[prop] > limit:
+                truncated += 1
+                continue
+            a, sch, nm = _label_for(store, r["dst_id"])
+            rows.append((prop, a, sch, short(nm, 60)))
+        render_block(f"out edges ({len(rows)})", rows,
+                     ["property", "alias", "schema", "name"])
+        if truncated:
+            out.append(f"… {truncated} edges hidden (raise limit=)")
+
+    if direction in ("in", "both"):
+        sql = ("SELECT prop, src_id FROM edges WHERE dst_id=?"
+               + (" AND prop=?" if prop_filter else "")
+               + " ORDER BY prop, src_id")
+        params = (eid, prop_filter) if prop_filter else (eid,)
+        rows = []
+        truncated = 0
+        per_prop = {}
+        for r in store.conn.execute(sql, params):
+            prop = r["prop"]
+            per_prop[prop] = per_prop.get(prop, 0) + 1
+            if per_prop[prop] > limit:
+                truncated += 1
+                continue
+            a, sch, nm = _label_for(store, r["src_id"])
+            rows.append((prop, a, sch, short(nm, 60)))
+        render_block(f"in edges ({len(rows)})", rows,
+                     ["property", "alias", "schema", "name"])
+        if truncated:
+            out.append(f"… {truncated} edges hidden (raise limit=)")
+
+    if len(out) == 1:
+        out.append("")
+        out.append("(no cached edges — the entity may not have been expanded yet; "
+                   "try `expand` or `read` first)")
+
+    header = f"neighbors {alias}"
+    if prop_filter:
+        header += f" property={prop_filter}"
+    if direction != "both":
+        header += f" direction={direction}"
+    return envelope(header, "\n".join(out))
+
+
+def cmd_recall(store: Store, args: dict) -> str:
+    """Summarise what's already in the local cache: schema mix, top-degree
+    nodes, most-recently-touched entities. Useful at session start to
+    answer 'what do I already know?' without round-tripping Aleph."""
+    collection = args.get("collection")
+    schema_filter = args.get("schema")
+    limit = max(1, min(50, int(args.get("limit") or 15)))
+
+    where: list[str] = []
+    params: list[Any] = []
+    if collection:
+        where.append("collection_id=?")
+        params.append(collection)
+    if schema_filter:
+        where.append("schema=?")
+        params.append(schema_filter)
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    total = store.conn.execute(
+        f"SELECT COUNT(*) FROM entities{where_sql}", params
+    ).fetchone()[0]
+    full_bodies = store.conn.execute(
+        f"SELECT COUNT(*) FROM entities{where_sql + (' AND' if where else ' WHERE')} has_full_body=1",
+        params,
+    ).fetchone()[0]
+    edge_count = store.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+
+    out: list[str] = []
+    scope = []
+    if collection:
+        scope.append(f"collection={collection}")
+    if schema_filter:
+        scope.append(f"schema={schema_filter}")
+    scope_label = "  ".join(scope) if scope else "all"
+    out.append(f"{total} entities ({full_bodies} with full body), "
+               f"{edge_count} cached edges  [{scope_label}]")
+
+    schema_rows = store.conn.execute(
+        f"SELECT schema, COUNT(*) AS n FROM entities{where_sql} "
+        f"GROUP BY schema ORDER BY n DESC LIMIT {limit}",
+        params,
+    ).fetchall()
+    if schema_rows:
+        out.append("")
+        out.append("## by schema")
+        out.append(table([(r["schema"], r["n"]) for r in schema_rows],
+                         headers=["schema", "count"]))
+
+    # Top-degree nodes (sum of in + out edges). Restrict to entities we
+    # have stubs for so we can show readable names.
+    degree_sql = """
+        SELECT e.id AS id, e.schema AS schema, e.name AS name, e.caption AS caption,
+               COALESCE(o.n, 0) + COALESCE(i.n, 0) AS degree
+          FROM entities e
+          LEFT JOIN (SELECT src_id AS id, COUNT(*) AS n FROM edges GROUP BY src_id) o
+                 ON o.id = e.id
+          LEFT JOIN (SELECT dst_id AS id, COUNT(*) AS n FROM edges GROUP BY dst_id) i
+                 ON i.id = e.id
+    """
+    if where:
+        degree_sql += " WHERE " + " AND ".join(f"e.{w}" for w in where)
+    degree_sql += f" ORDER BY degree DESC, e.updated_at DESC LIMIT {limit}"
+    degree_rows = store.conn.execute(degree_sql, params).fetchall()
+    deg_rows: list[tuple] = []
+    for r in degree_rows:
+        if not r["degree"]:
+            continue
+        a = store.alias_for(r["id"]) or "-"
+        nm = r["name"] or r["caption"] or r["id"][:10]
+        deg_rows.append((a, r["schema"] or "?", short(nm, 50), r["degree"]))
+    if deg_rows:
+        out.append("")
+        out.append("## top by degree (in+out edges)")
+        out.append(table(deg_rows, headers=["alias", "schema", "name", "degree"]))
+
+    recent_sql = (
+        f"SELECT id, schema, name, caption, updated_at FROM entities{where_sql} "
+        f"ORDER BY updated_at DESC LIMIT {limit}"
+    )
+    recent = store.conn.execute(recent_sql, params).fetchall()
+    rec_rows: list[tuple] = []
+    for r in recent:
+        a = store.alias_for(r["id"]) or "-"
+        nm = r["name"] or r["caption"] or r["id"][:10]
+        rec_rows.append((a, r["schema"] or "?", short(nm, 50),
+                         (r["updated_at"] or "")[:19]))
+    if rec_rows:
+        out.append("")
+        out.append("## recently touched")
+        out.append(table(rec_rows, headers=["alias", "schema", "name", "updated"]))
+
+    return envelope("recall " + scope_label, "\n".join(out))
+
+
+def cmd_cache_stats(store: Store, args: dict) -> str:
+    """Visibility into the response cache: size, age, hit-shape."""
+    db_path = store.db_path
+    size_bytes = db_path.stat().st_size if db_path.exists() else 0
+
+    counts = {
+        "entities": store.conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0],
+        "aliases": store.conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0],
+        "edges": store.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0],
+        "cache": store.conn.execute("SELECT COUNT(*) FROM cache").fetchone()[0],
+    }
+    full_bodies = store.conn.execute(
+        "SELECT COUNT(*) FROM entities WHERE has_full_body=1"
+    ).fetchone()[0]
+
+    cache_age = store.conn.execute(
+        "SELECT MIN(set_at), MAX(set_at) FROM cache"
+    ).fetchone()
+    oldest = cache_age[0] if cache_age else None
+    newest = cache_age[1] if cache_age else None
+
+    def fmt_size(n: int) -> str:
+        for unit in ("B", "KB", "MB", "GB"):
+            if n < 1024:
+                return f"{n:.1f} {unit}"
+            n /= 1024  # type: ignore[assignment]
+        return f"{n:.1f} TB"
+
+    rows = [
+        ("db", str(db_path)),
+        ("size", fmt_size(size_bytes)),
+        ("entities", f"{counts['entities']} ({full_bodies} with full body)"),
+        ("aliases", str(counts["aliases"])),
+        ("edges", str(counts["edges"])),
+        ("cached responses", str(counts["cache"])),
+        ("oldest cache entry", oldest or "(empty)"),
+        ("newest cache entry", newest or "(empty)"),
+    ]
+    return envelope("cache stats", table(rows, headers=["key", "value"]))
+
+
+def cmd_cache_clear(store: Store, args: dict) -> str:
+    """Truncate the response cache. Entities, aliases, and edges are
+    preserved — only the keyed-response table is cleared, so the agent
+    will refetch on the next call but keep its graph and aliases."""
+    older_than_days = args.get("older_than_days")
+    if older_than_days is not None:
+        try:
+            days = int(older_than_days)
+        except (TypeError, ValueError) as exc:
+            raise CommandError(
+                f"older_than_days must be an integer, got {older_than_days!r}"
+            ) from exc
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        cur = store.conn.execute("DELETE FROM cache WHERE set_at < ?", (cutoff,))
+        scope = f"older than {days}d (cutoff {cutoff})"
+    else:
+        cur = store.conn.execute("DELETE FROM cache")
+        scope = "all entries"
+    deleted = cur.rowcount
+    store.conn.commit()
+    body = f"cleared {deleted} cache entr{'y' if deleted == 1 else 'ies'} ({scope})"
+    return envelope("cache clear", body)
+
+
+# ---------------------------------------------------------------------------
+# Read-only SQL passthrough.
+# ---------------------------------------------------------------------------
+
+SQL_MAX_ROWS = 100
+
+
+def cmd_sql(store: Store, args: dict) -> str:
+    """Run an arbitrary read-only SELECT against the cache DB. Opens a
+    fresh connection in mode=ro so writes can't slip through, regardless
+    of the query text. Result is rendered as a table; long results are
+    truncated to SQL_MAX_ROWS with a hint to add LIMIT."""
+    query = args.get("query")
+    if not query:
+        raise CommandError(
+            "sql requires a query",
+            'pass query="select alias, n from aliases order by n desc limit 5"',
+        )
+    query = query.strip()
+
+    uri = f"file:{store.db_path}?mode=ro"
+    ro = sqlite3.connect(uri, uri=True)
+    ro.row_factory = sqlite3.Row
+    try:
+        try:
+            cur = ro.execute(query)
+        except sqlite3.Error as exc:
+            raise CommandError(f"sqlite error: {exc}",
+                               "see SKILL.md for the cache schema") from exc
+        if cur.description is None:
+            return envelope("sql", "(query produced no result set)")
+        headers = [d[0] for d in cur.description]
+        rows: list[tuple] = []
+        truncated = 0
+        for i, r in enumerate(cur):
+            if i >= SQL_MAX_ROWS:
+                truncated += 1
+                continue
+            rows.append(tuple("" if v is None else short(str(v), 80) for v in r))
+        truncated += sum(1 for _ in cur)  # exhaust any remainder
+    finally:
+        ro.close()
+
+    if not rows:
+        body = f"(0 rows)\ncolumns: {', '.join(headers)}"
+    else:
+        body = table(rows, headers=headers) + f"\n\n{len(rows)} row(s)"
+        if truncated:
+            body += (f"\n[+{truncated} more rows truncated — "
+                     f"add LIMIT to your query to scope the result]")
+    return envelope("sql", body)

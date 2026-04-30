@@ -1,7 +1,8 @@
-"""SQLite-backed store for aliases (`r1`, `r2`, …), entity blobs, and
-the response cache, plus the `see_entity` ingester that walks nested
-property refs so every entity the agent sees gets a stable alias on
-first sight (and the alias resolves without a round-trip later)."""
+"""SQLite-backed store for aliases (`r1`, `r2`, …), entity blobs, the
+response cache, and the property-edge graph, plus the `see_entity`
+ingester that walks nested property refs so every entity the agent
+sees gets a stable alias on first sight (and the alias resolves
+without a round-trip later)."""
 
 from __future__ import annotations
 
@@ -11,10 +12,11 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .errors import CommandError
 from .render import first_label, first_string, short
+from .schemas import REF_PROPERTIES
 
 
 def iso_now() -> str:
@@ -45,15 +47,83 @@ CREATE TABLE IF NOT EXISTS cache (
     value TEXT NOT NULL,
     set_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS edges (
+    src_id TEXT NOT NULL,
+    prop TEXT NOT NULL,
+    dst_id TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    PRIMARY KEY (src_id, prop, dst_id)
+);
+CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src_id, prop);
+CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_id, prop);
 """
+
+# Properties whose bare-string list members are entity ids, not labels.
+# Dict-with-{id,schema} refs are caught everywhere; this catches the
+# remaining bare-id references (ancestors, sometimes parent).
+BARE_STRING_REF_PROPS: set[str] = set(REF_PROPERTIES) | {"ancestors"}
+
+
+def iter_property_edges(props: dict) -> Iterator[tuple[str, str]]:
+    """Yield (prop, dst_entity_id) for every entity reference in a properties
+    dict. Recognises dict-with-id-and-schema refs anywhere, and bare-string
+    refs only on properties known to hold entity ids."""
+    if not isinstance(props, dict):
+        return
+    for prop, value in props.items():
+        yield from _ref_ids(prop, value)
+
+
+def _ref_ids(prop: str, value: Any) -> Iterator[tuple[str, str]]:
+    if value is None:
+        return
+    if isinstance(value, str):
+        if prop in BARE_STRING_REF_PROPS and value:
+            yield prop, value
+        return
+    if isinstance(value, dict):
+        eid = value.get("id")
+        sch = value.get("schema")
+        if isinstance(eid, str) and eid and isinstance(sch, str):
+            yield prop, eid
+        return
+    if isinstance(value, list):
+        for item in value:
+            yield from _ref_ids(prop, item)
+
+
+SCHEMA_VERSION = 1
 
 
 class Store:
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = db_path
         self.conn = sqlite3.connect(str(db_path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Apply forward migrations against existing databases. Schema CREATE
+        statements above are idempotent, so this only needs to handle data
+        backfills (e.g. populating `edges` from existing entity blobs)."""
+        ver = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if ver < 1:
+            for row in self.conn.execute(
+                "SELECT id, properties, first_seen FROM entities WHERE properties IS NOT NULL"
+            ).fetchall():
+                try:
+                    props = json.loads(row["properties"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                for prop, dst in iter_property_edges(props):
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?)",
+                        (row["id"], prop, dst, row["first_seen"]),
+                    )
+            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            self.conn.commit()
 
     # ----- entities -------------------------------------------------------
 
@@ -120,6 +190,21 @@ class Store:
             "SELECT collection_id FROM entities WHERE id=?", (eid,)
         ).fetchone()
         return row[0] if row else None
+
+    # ----- edges ----------------------------------------------------------
+
+    def record_edges(self, src_id: str, props: dict | None) -> None:
+        """Persist (src, prop, dst) edges for every entity ref in `props`.
+        Idempotent — repeated calls keep the original `first_seen`."""
+        if not props:
+            return
+        now = iso_now()
+        for prop, dst in iter_property_edges(props):
+            self.conn.execute(
+                "INSERT OR IGNORE INTO edges VALUES (?, ?, ?, ?)",
+                (src_id, prop, dst, now),
+            )
+        self.conn.commit()
 
     # ----- aliases --------------------------------------------------------
 
@@ -233,6 +318,7 @@ def see_entity(
         properties=props if props else None,
         collection_id=cid, server=server, full_body=full_body,
     )
+    store.record_edges(eid, props)
     alias = store.assign_alias(eid)
 
     # Aleph inlines nested entity blobs for property refs (emitters, recipients,

@@ -123,6 +123,69 @@ List Aleph collections visible to your API key.
 sift sources [grep=<term>] [limit=50]
 ```
 
+## Local cache tools
+
+These commands read against the local SQLite cache only — no Aleph round-trip, so they're free to call freely.
+
+### `recall`
+
+Summarise what's already in the cache for this vault: schema mix, top-degree nodes (entities with the most cached relations), and what was touched most recently.
+
+```
+sift recall [collection=<id>] [schema=<S>] [limit=15]
+```
+
+Use this at the start of a session to see what prior investigations have already pulled in — same alias table, same entities.
+
+### `neighbors`
+
+Show every edge sift has cached for an entity, grouped by FtM property. Built from data already returned by `read` / `expand` / `search`, so coverage is partial — but for entities you've already explored it lets you re-walk the graph without spending API calls.
+
+```
+sift neighbors alias=r5 [direction=out|in|both] [property=<name>] [limit=50]
+```
+
+If neighbors returns "(no cached edges)", run `expand alias=r5` first to populate them.
+
+### `sql`
+
+Read-only SQL against the cache DB. The connection is opened in `mode=ro`, so writes are rejected even if you ask for them.
+
+```
+sift sql query="SELECT alias, schema, name FROM aliases JOIN entities ON entities.id=aliases.entity_id ORDER BY n DESC LIMIT 10"
+```
+
+#### Cache schema
+
+```
+entities(id, schema, caption, name, properties JSON, collection_id, server,
+         has_full_body, first_seen, updated_at)
+aliases(alias, n, entity_id, assigned_at)
+edges(src_id, prop, dst_id, first_seen)
+cache(key, value JSON, set_at)
+```
+
+Useful joins: `aliases.entity_id = entities.id`; `edges.src_id`/`edges.dst_id` reference `entities.id`. `properties` is JSON — use SQLite's `json_extract(properties, '$.subject[0]')` for nested fields.
+
+### `export`
+
+Render `report.md` → `report.html`, replacing every `r\d+` alias with a hyperlink to the entity on its Aleph server. Aliases inside fenced code, inline code, or existing markdown links are left untouched.
+
+```
+sift export [SRC=report.md] [--out report.html] [--server https://aleph.example.org]
+```
+
+`report.md` stays the working file (cheap, dense, alias-shorthand for the agent); `report.html` is the human-readable artefact (full IDs, real links, ready to share). Run this once you're done writing the report.
+
+### `cache stats` / `cache clear`
+
+```
+sift cache stats
+sift cache clear [older_than_days=30]
+```
+
+`stats` reports DB size, row counts per table, and the age range of cached responses. `clear` truncates the response cache only — entities, aliases, and edges are preserved, so aliases and graph history survive across cache clears.
+
 ## Aleph quirks worth knowing
 
 - **10,000 hit cap**: Aleph caps `offset + limit` at 10k. Beyond that, results are unreachable through pagination — narrow by collection or date range.
