@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Quieter Homebrew: skip the auto-update banner that runs on every
+# install, and silence the post-install env-hint nag. Real failures
+# still print on stderr.
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_ENV_HINTS=1
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "sift currently supports macOS only." >&2
   exit 1
@@ -22,12 +28,18 @@ fi
 
 # Runtime deps. uv ships sift; pi is the agent harness; llama.cpp serves
 # the local model; node is needed for the npm-installed pi.
-echo "Installing runtime dependencies via Homebrew..."
-brew install uv node llama.cpp >/dev/null
+missing=()
+for formula in uv node llama.cpp; do
+  brew list --formula "$formula" >/dev/null 2>&1 || missing+=("$formula")
+done
+if (( ${#missing[@]} > 0 )); then
+  echo "Installing runtime dependencies via Homebrew: ${missing[*]}"
+  brew install "${missing[@]}" >/dev/null
+fi
 
 if ! command -v pi >/dev/null 2>&1; then
   echo "Installing the pi agent harness..."
-  npm install -g @mariozechner/pi
+  npm install -g --loglevel=error @mariozechner/pi
 fi
 
 # If a previous (pre-0.2) Homebrew-installed sift is on PATH, get rid of
@@ -38,7 +50,7 @@ if brew list --formula 2>/dev/null | grep -qx sift; then
 fi
 
 echo "Installing sift..."
-uv tool install --force git+https://github.com/data-desk-eco/sift
+uv tool install --force --quiet git+https://github.com/data-desk-eco/sift
 
 cat <<'EOF'
 
