@@ -28,11 +28,14 @@ DEFAULT_LOCAL_PORT = 1234
 
 # Recommended local model — Qwen3.6 35B A3B (MoE; ~3B active), unsloth
 # UD-Q2_K_XL quant. ~12.3 GB on disk, fits on a 24 GB Mac alongside a
-# 128k context window.
+# 256k context window. Both llama-server and pi need to know the same
+# size — pi uses LOCAL_CONTEXT_WINDOW to decide when to compact, and
+# defaults to 128k if the model entry doesn't tell it otherwise.
 DEFAULT_MODEL_REPO = "unsloth/Qwen3.6-35B-A3B-GGUF"
 DEFAULT_MODEL_FILE = "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
 DEFAULT_MODEL_NAME = "qwen3.6-35b-a3b"
 DEFAULT_MODEL_DISPLAY = "Qwen3.6 35B A3B (local)"
+LOCAL_CONTEXT_WINDOW = 262144
 
 SIFT_HOME = Path.home() / ".sift"
 
@@ -109,7 +112,15 @@ def configure_pi() -> None:
                 "supportsDeveloperRole": False,
                 "supportsReasoningEffort": False,
             },
-            "models": [{"id": model, "name": display}],
+            "models": [{
+                "id": model, "name": display,
+                # Pi defaults to 128k if absent — match what llama-server is
+                # actually serving so it doesn't compact prematurely. For
+                # hosted backends we leave this off and let pi pick whatever
+                # the provider/model advertises.
+                **({"contextWindow": LOCAL_CONTEXT_WINDOW}
+                   if config["kind"] == "local" else {}),
+            }],
         }},
     }, indent=2) + "\n")
     (pi_dir / "settings.json").write_text(json.dumps({
@@ -159,7 +170,7 @@ def start_local() -> None:
             "--port", str(port),
             "--jinja",
             "--no-webui",
-            "--ctx-size", "131072",
+            "--ctx-size", str(LOCAL_CONTEXT_WINDOW),
             "--reasoning-budget", "16384",
             "--alias", DEFAULT_MODEL_NAME,
         ],
