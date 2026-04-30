@@ -174,9 +174,17 @@ cmd_init() {
     local model_path="$DELVE_HOME/models/$DEFAULT_MODEL_FILE"
     if [[ ! -f "$model_path" ]]; then
       log init "downloading model (~12GB) — go get a coffee"
-      curl -L --fail --progress-bar \
-        -o "$model_path.partial" \
-        "https://huggingface.co/$DEFAULT_MODEL_REPO/resolve/main/$DEFAULT_MODEL_FILE"
+      # Resolve the HF redirect to the signed CDN URL first, then download
+      # in one shot. Without this, curl's --progress-bar shows a misleading
+      # 100% bar for the small redirect document before the real download
+      # of the 12GB file even starts.
+      local resolved_url
+      resolved_url=$(curl -fsLI \
+        "https://huggingface.co/$DEFAULT_MODEL_REPO/resolve/main/$DEFAULT_MODEL_FILE" \
+        -o /dev/null -w '%{url_effective}')
+      [[ -n "$resolved_url" ]] || die "couldn't resolve model URL on huggingface.co"
+      curl --fail --progress-bar --retry 5 --retry-all-errors \
+        -o "$model_path.partial" "$resolved_url"
       mv "$model_path.partial" "$model_path"
     else
       log init "model already downloaded"
