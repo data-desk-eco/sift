@@ -70,6 +70,7 @@ backend_start_llamacpp() {
     --jinja \
     --no-webui \
     --ctx-size 32768 \
+    --reasoning-budget 16384 \
     --alias "$DEFAULT_MODEL_NAME" \
     >"$DELVE_HOME/llama-server.log" 2>&1 &
   echo $! >"$DELVE_HOME/llama-server.pid"
