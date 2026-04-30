@@ -22,6 +22,8 @@ sift auto                                                    # interactive REPL
 
 `sift init` asks whether you want the recommended local backend (downloads ~12 GB on first run) or a hosted OpenAI-compatible endpoint (URL + key + model). Switch later with `sift backend local` / `sift backend hosted`.
 
+It also asks for a one-line description of the project the agent is working on — where the files come from, what you're investigating — which gets prepended to the agent's system prompt for every run. View or change it with `sift project [show|set|edit|clear]`.
+
 In headless mode the agent appends to a `report.md` inside a per-run session directory in the vault, and prints a terse `[scope] message` log to your terminal. `--debug` dumps pi's full JSON event stream instead.
 
 The same tools the agent uses are available to you directly:
@@ -42,14 +44,13 @@ See `sift --help` for the full list, or `sift <cmd> --help` for per-command flag
 
 ## Configuration
 
-Environment overrides:
+All state lives under `~/.sift`:
 
-| | |
-|---|---|
-| `SIFT_HOME` | where the vault, model, and pi config live (default `~/.sift`) |
-| `SIFT_PORT` | local LLM server port (default `1234`, local backend only) |
-
-Backend config (kind, URL, key, model name) lives in `~/.sift/backend.json` (mode 0600).
+- `.vault.sparseimage` — encrypted volume holding API keys and per-investigation `report.md` outputs
+- `backend.json` (mode 0600) — backend kind, model, URL/key, and the local-server port
+- `models/` — downloaded GGUF for the local backend
+- `pi/` — provider config for the agent harness
+- `project.md` — optional one-line project description, prepended to the agent's system prompt
 
 ## License
 

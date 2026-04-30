@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import backend
 from .client import AlephClient
 from .commands import (
     cmd_browse, cmd_expand, cmd_hubs, cmd_read, cmd_search,
@@ -231,6 +232,50 @@ def vault_list(vault: Vault, args: list[str]) -> str:
     return "\n".join(keys) if keys else "(empty)"
 
 
+# ---------------------------------------------------------------------------
+# Backend subcommands (called from bin/sift; not user-facing)
+# ---------------------------------------------------------------------------
+
+
+def backend_get(args: list[str]) -> str:
+    if len(args) != 1:
+        raise CommandError("backend get: usage 'backend get <KEY>'")
+    return backend.get_field(args[0])
+
+
+def backend_write_local(args: list[str]) -> str:
+    if len(args) != 2:
+        raise CommandError("backend write-local: usage '<model_file> <model_name>'")
+    backend.write_local(args[0], args[1])
+    return ""
+
+
+def backend_write_hosted(args: list[str]) -> str:
+    """Reads the api key from stdin so it never appears in argv."""
+    if len(args) != 2:
+        raise CommandError(
+            "backend write-hosted: usage '<base_url> <model_name>'  (api_key on stdin)"
+        )
+    api_key = sys.stdin.read().rstrip("\n")
+    backend.write_hosted(args[0], api_key, args[1])
+    return ""
+
+
+def backend_configure_pi(args: list[str]) -> str:
+    if args:
+        raise CommandError("backend configure-pi: takes no args (port comes from backend.json)")
+    backend.configure_pi()
+    return ""
+
+
+BACKEND_SUBCMDS = {
+    "get": backend_get,
+    "write-local": backend_write_local,
+    "write-hosted": backend_write_hosted,
+    "configure-pi": backend_configure_pi,
+}
+
+
 VAULT_SUBCMDS = {
     "init": vault_init,
     "unlock": vault_unlock,
@@ -268,6 +313,24 @@ def main() -> int:
         return 0
 
     tool = sys.argv[1]
+
+    # Backend subcommands (called from bin/sift).
+    if tool == "backend":
+        if len(sys.argv) < 3 or sys.argv[2] not in BACKEND_SUBCMDS:
+            print(f"[ERROR] usage: sift-tool backend <{'|'.join(BACKEND_SUBCMDS)}>",
+                  file=sys.stderr)
+            return 2
+        try:
+            out = BACKEND_SUBCMDS[sys.argv[2]](sys.argv[3:])
+        except CommandError as e:
+            msg = f"[ERROR] {e.message}"
+            if e.suggestion:
+                msg += f"\n  → {e.suggestion}"
+            print(msg, file=sys.stderr)
+            return 1
+        if out:
+            print(out)
+        return 0
 
     # Vault subcommands.
     if tool == "vault":

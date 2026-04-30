@@ -19,8 +19,7 @@
 
 set -euo pipefail
 
-SIFT_HOME="${SIFT_HOME:-$HOME/.sift}"
-SIFT_PORT="${SIFT_PORT:-1234}"
+SIFT_HOME="$HOME/.sift"
 SIFT_BACKEND_FILE="$SIFT_HOME/backend.json"
 
 # Recommended local model — Qwen3.6 35B A3B (MoE; ~3B active), unsloth
@@ -59,22 +58,27 @@ ensure_initialized() {
 # Backend (local LLM server)
 # ---------------------------------------------------------------------------
 
+local_port() {
+  local p; p=$(backend_get port); printf '%s' "${p:-1234}"
+}
+
 backend_health() {
-  curl -sf "http://127.0.0.1:$SIFT_PORT/v1/models" >/dev/null 2>&1
+  curl -sf "http://127.0.0.1:$(local_port)/v1/models" >/dev/null 2>&1
 }
 
 backend_start_llamacpp() {
+  local port; port=$(local_port)
   if backend_health; then
-    log server "llama-server already up on :$SIFT_PORT"
+    log server "llama-server already up on :$port"
     return
   fi
   local model_path="$SIFT_HOME/models/$DEFAULT_MODEL_FILE"
   [[ -f "$model_path" ]] || die "model not found at $model_path — run 'sift init'"
-  log server "starting llama-server on :$SIFT_PORT (logs: $SIFT_HOME/llama-server.log)"
+  log server "starting llama-server on :$port (logs: $SIFT_HOME/llama-server.log)"
   nohup llama-server \
     --model "$model_path" \
     --host 127.0.0.1 \
-    --port "$SIFT_PORT" \
+    --port "$port" \
     --jinja \
     --no-webui \
     --ctx-size 131072 \
@@ -92,9 +96,7 @@ backend_start_llamacpp() {
 # Read a string field from $SIFT_BACKEND_FILE. Empty if the file or key is
 # missing — callers should validate.
 backend_get() {
-  python3 -c "import json,sys
-try: print(json.load(open('$SIFT_BACKEND_FILE')).get('$1',''))
-except Exception: pass"
+  "$SIFT_TOOL" backend get "$1"
 }
 
 backend_start() {
@@ -111,36 +113,7 @@ backend_start() {
 # Write pi's provider config so it talks to the configured backend.
 # Idempotent — overwritten every run so the port stays in sync for local.
 configure_pi() {
-  mkdir -p "$SIFT_HOME/pi"
-  SIFT_HOME="$SIFT_HOME" SIFT_PORT="$SIFT_PORT" \
-    SIFT_BACKEND_FILE="$SIFT_BACKEND_FILE" \
-    python3 - <<'PY'
-import json, os
-home = os.environ["SIFT_HOME"]
-backend = json.load(open(os.environ["SIFT_BACKEND_FILE"]))
-if backend["kind"] == "local":
-    base_url = f'http://127.0.0.1:{os.environ["SIFT_PORT"]}/v1'
-    api_key = "sift-local"
-    display = "Qwen3.6 35B A3B (local)"
-else:
-    base_url = backend["base_url"]
-    api_key = backend.get("api_key", "")
-    display = backend["model_name"]
-model = backend["model_name"]
-json.dump({
-    "providers": {"sift": {
-        "baseUrl": base_url,
-        "api": "openai-completions",
-        "apiKey": api_key,
-        "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False},
-        "models": [{"id": model, "name": display}],
-    }},
-}, open(f"{home}/pi/models.json", "w"), indent=2)
-json.dump(
-    {"defaultProvider": "sift", "defaultModel": model},
-    open(f"{home}/pi/settings.json", "w"), indent=2,
-)
-PY
+  "$SIFT_TOOL" backend configure-pi
 }
 
 # ---------------------------------------------------------------------------
@@ -185,14 +158,7 @@ backend_init_local() {
   else
     log init "model already downloaded"
   fi
-  cat >"$SIFT_BACKEND_FILE" <<JSON
-{
-  "kind": "local",
-  "model_file": "$DEFAULT_MODEL_FILE",
-  "model_name": "$DEFAULT_MODEL_NAME"
-}
-JSON
-  chmod 600 "$SIFT_BACKEND_FILE"
+  "$SIFT_TOOL" backend write-local "$DEFAULT_MODEL_FILE" "$DEFAULT_MODEL_NAME"
 }
 
 backend_init_hosted() {
@@ -215,15 +181,8 @@ backend_init_hosted() {
   fi
   [[ $probe_rc -eq 0 ]] || die "couldn't reach $base_url/models — check URL and key"
 
-  cat >"$SIFT_BACKEND_FILE" <<JSON
-{
-  "kind": "hosted",
-  "base_url": "$base_url",
-  "api_key": "$api_key",
-  "model_name": "$model_name"
-}
-JSON
-  chmod 600 "$SIFT_BACKEND_FILE"
+  printf '%s' "$api_key" \
+    | "$SIFT_TOOL" backend write-hosted "$base_url" "$model_name"
 }
 
 backend_choose_interactive() {
@@ -273,8 +232,43 @@ cmd_init() {
     backend_choose_interactive
   fi
 
+  if [[ ! -f "$SIFT_HOME/project.md" ]]; then
+    printf "\nBriefly describe the project you're working on, as context for the agent - where do the files come from?\n> "
+    local project_desc
+    IFS= read -r project_desc
+    if [[ -n "$project_desc" ]]; then
+      printf '%s\n' "$project_desc" >"$SIFT_HOME/project.md"
+    else
+      log init "skipped — set later with 'sift project'"
+    fi
+  else
+    log init "project context already set (use 'sift project' to view/edit)"
+  fi
+
   touch "$SIFT_HOME/.initialized"
   log init "done — try: sift auto \"investigate <subject>\""
+}
+
+cmd_project() {
+  case "${1:-}" in
+    ""|show)
+      [[ -f "$SIFT_HOME/project.md" ]] \
+        || die "no project context set — run 'sift init' or 'sift project set'"
+      cat "$SIFT_HOME/project.md" ;;
+    set)
+      printf "Briefly describe the project you're working on, as context for the agent - where do the files come from?\n> "
+      local desc
+      IFS= read -r desc
+      [[ -n "$desc" ]] || die "description required"
+      printf '%s\n' "$desc" >"$SIFT_HOME/project.md"
+      log project "saved to $SIFT_HOME/project.md" ;;
+    edit)
+      "${EDITOR:-vi}" "$SIFT_HOME/project.md" ;;
+    clear)
+      rm -f "$SIFT_HOME/project.md"
+      log project "cleared" ;;
+    *) die "usage: sift project [show|set|edit|clear]" ;;
+  esac
 }
 
 cmd_backend() {
@@ -310,10 +304,21 @@ cmd_auto() {
 
   export PI_CODING_AGENT_DIR="$SIFT_HOME/pi"
 
+  # Combine the static skill instructions with any user-provided project
+  # context into a single system-prompt file for pi.
+  local sysprompt="$SIFT_HOME/system-prompt.md"
+  {
+    cat "$AGENTS_MD"
+    if [[ -f "$SIFT_HOME/project.md" ]]; then
+      printf '\n\n## Project context\n\n'
+      cat "$SIFT_HOME/project.md"
+    fi
+  } >"$sysprompt"
+
   if [[ -z "$prompt" ]]; then
     # Interactive REPL — drop straight into pi.
     exec "$SIFT_TOOL" vault exec pi \
-      --append-system-prompt "$AGENTS_MD" \
+      --append-system-prompt "$sysprompt" \
       --skill "$SKILL"
   fi
 
@@ -327,7 +332,7 @@ cmd_auto() {
 
   set +e
   "$SIFT_TOOL" vault exec pi \
-    --append-system-prompt "$AGENTS_MD" \
+    --append-system-prompt "$sysprompt" \
     --skill "$SKILL" \
     -p --mode json "$prompt" ${pi_args[@]+"${pi_args[@]}"} \
     | SIFT_DEBUG="$debug" "$SIFT_PACKAGE/bin/sift-log"
@@ -353,6 +358,12 @@ Backend management:
   sift backend local                     switch to local llama.cpp + Qwen3.6
   sift backend hosted                    switch to a hosted OpenAI-compatible endpoint
 
+Project context (prepended to the agent's system prompt):
+  sift project                           show current project description
+  sift project set                       prompt for a new description
+  sift project edit                      open in $EDITOR
+  sift project clear                     remove
+
 Research tools (the same surface the agent uses):
   sift search query="..." [type=...] [collection=...]
   sift read   alias=r5
@@ -360,9 +371,7 @@ Research tools (the same surface the agent uses):
   sift browse | tree | similar | hubs | sources    (see 'sift <cmd> --help')
   sift vault status | unlock | lock | set | get | list
 
-Environment:
-  SIFT_HOME     where the vault, model, and pi config live (default ~/.sift)
-  SIFT_PORT     local LLM server port (default 1234, local backend only)
+All state lives under ~/.sift (vault, model, backend.json, pi config).
 EOF
 }
 
@@ -379,6 +388,8 @@ case "${1:-}" in
     shift; cmd_auto "$@" ;;
   backend)
     shift; cmd_backend "$@" ;;
+  project)
+    shift; cmd_project "$@" ;;
   search|read|expand|browse|tree|similar|hubs|sources|vault)
     # Forward to the bundled tool. ALEPH_PROJECT_DIR is exported at the
     # top of this script, so the vault is found regardless of cwd.
