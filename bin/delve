@@ -217,6 +217,8 @@ cmd_run() {
   export ALEPH_SESSION="$(date +%Y%m%d-%H%M%S)${slug:+-$slug}"
   export ALEPH_PROJECT_DIR="$DELVE_HOME"
   export PI_CODING_AGENT_DIR="$DELVE_HOME/pi"
+  # Put the skill on PATH so the agent can invoke `aleph` directly.
+  export PATH="$SKILL:$PATH"
 
   set +e
   "$SKILL/aleph" vault exec pi \
@@ -235,6 +237,7 @@ cmd_repl() {
   configure_pi
   export ALEPH_PROJECT_DIR="$DELVE_HOME"
   export PI_CODING_AGENT_DIR="$DELVE_HOME/pi"
+  export PATH="$SKILL:$PATH"
   exec "$SKILL/aleph" vault exec pi \
     --append-system-prompt "$AGENTS_MD" \
     --skill "$SKILL"
