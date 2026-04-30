@@ -161,10 +161,15 @@ cmd_init() {
   read -r aleph_url
   aleph_url="${aleph_url:-https://aleph.occrp.org}"
   printf 'Aleph API key (input hidden): '
-  stty -echo
-  read -r aleph_key
-  stty echo
-  printf '\n'
+  if [[ -t 0 ]]; then
+    stty -echo
+    read -r aleph_key
+    stty echo
+    printf '\n'
+  else
+    # Piped stdin (e.g. a colleague scripting setup) — no echo control needed.
+    read -r aleph_key
+  fi
   [[ -n "$aleph_key" ]] || die "API key required"
   "$SKILL/aleph" vault set ALEPH_URL     "$aleph_url" >/dev/null
   "$SKILL/aleph" vault set ALEPH_API_KEY "$aleph_key" >/dev/null
