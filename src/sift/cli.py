@@ -249,7 +249,7 @@ def auto(ctx: click.Context, prompt: str | None, debug: bool) -> None:
         # Interactive REPL — replace this process with pi.
         os.execvpe("pi", [
             "pi",
-            "--append-system-prompt", str(sysprompt_path),
+            "--system-prompt", str(sysprompt_path),
             "--skill", str(skill_path),
         ], env)
         return  # not reached
@@ -261,7 +261,7 @@ def auto(ctx: click.Context, prompt: str | None, debug: bool) -> None:
 
     proc = subprocess.Popen(
         ["pi",
-         "--append-system-prompt", str(sysprompt_path),
+         "--system-prompt", str(sysprompt_path),
          "--skill", str(skill_path),
          "-p", "--mode", "json", prompt, *pi_extra],
         stdout=subprocess.PIPE, stderr=sys.stderr,
