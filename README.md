@@ -2,7 +2,7 @@
 
 A CLI for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/) — search documents, emails, and entities, follow extracted links, browse folder trees. Credentials and findings live in an encrypted sparseimage at `~/.sift`.
 
-It's the same surface for humans and agents: `sift search`, `sift read`, `sift vault …` are what you type at the prompt, and they're also what an agent calls when you run `sift auto "investigate …"`. Self-automating: `sift auto` drives the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) harness with [a small skill file](share/SKILL.md) and lets the agent loop over the same `sift` you use directly. The LLM backend is your choice — a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves your machine but Aleph queries) or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …).
+The command surface is shared between humans and agents: `sift search`, `sift read`, `sift vault …` work the same whether invoked at the prompt or called by the agent under `sift auto "investigate …"`. `sift auto` drives the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) harness with [a small skill file](share/SKILL.md), giving the agent access to the same commands. Two LLM backends are supported: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves the machine except Aleph queries), or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …).
 
 ## Install
 
@@ -10,9 +10,9 @@ It's the same surface for humans and agents: `sift search`, `sift read`, `sift v
 curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
 ```
 
-The installer brings in runtime dependencies via Homebrew (`uv`, `node`, `llama.cpp`) and the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness via npm, then installs sift itself with `uv tool install`. Make sure `~/.local/bin` is on your `PATH`.
+The installer pulls in runtime dependencies via Homebrew (`uv`, `node`, `llama.cpp`) and the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness via npm, then installs sift itself with `uv tool install`. `~/.local/bin` must be on `PATH`.
 
-Manually: `brew install uv node llama.cpp && npm install -g @mariozechner/pi && uv tool install git+https://github.com/data-desk-eco/sift`.
+To install manually: `brew install uv node llama.cpp && npm install -g @mariozechner/pi && uv tool install git+https://github.com/data-desk-eco/sift`.
 
 ## Quick start
 
@@ -23,15 +23,15 @@ sift auto -t 30m "investigate Acme Corp"                     # with a soft deadl
 sift auto                                                    # interactive REPL
 ```
 
-`sift init` asks whether you want the recommended local backend (downloads ~12 GB on first run) or a hosted OpenAI-compatible endpoint (URL + key + model). Switch later with `sift backend local` / `sift backend hosted`.
+`sift init` prompts for either the recommended local backend (downloads ~12 GB on first run) or a hosted OpenAI-compatible endpoint (URL, key, and model). Switch later with `sift backend local` or `sift backend hosted`.
 
-It also asks for a one-line description of the project the agent is working on — where the files come from, what you're investigating — which gets prepended to the agent's system prompt for every run. View or change it with `sift project [show|set|edit|clear]`.
+It also prompts for a one-line project description (data source and subject of investigation), which is prepended to the agent's system prompt on every run. View or change it with `sift project [show|set|edit|clear]`.
 
-In headless mode the agent appends to a `report.md` inside a per-run session directory in the vault, and prints a terse `[scope] message` log to your terminal. `--debug` dumps pi's full JSON event stream instead.
+In headless mode the agent writes to `report.md` in a per-run session directory inside the vault and emits a terse `[scope] message` log to the terminal. `--debug` emits pi's full JSON event stream instead.
 
-`-t / --time-limit` (e.g. `30m`, `1h30m`, `90s`) sets a soft deadline. The agent self-paces against it by calling `sift time` between tool calls — there's no hard kill, but it's nudged to stop opening new threads as the deadline approaches and to write `report.md` before stopping.
+`-t / --time-limit` (e.g. `30m`, `1h30m`, `90s`) sets a soft deadline. The agent paces itself against the deadline by calling `sift time` between tool calls. The deadline is not enforced, but the agent is instructed to stop opening new threads as it approaches and to finalise `report.md` before exiting.
 
-The same tools the agent uses are available to you directly:
+The agent's tools are also available directly:
 
 ```bash
 sift search query="..." [collection=<id>]
@@ -49,12 +49,12 @@ See `sift --help` for the full list, or `sift <cmd> --help` for per-command flag
 
 ## Configuration
 
-All state lives under `~/.sift`:
+All state is stored under `~/.sift`:
 
 - `.vault.sparseimage` — encrypted volume holding API keys and per-investigation `report.md` outputs
 - `backend.json` (mode 0600) — backend kind, model, URL/key, and the local-server port
-- `models/` — downloaded GGUF for the local backend
-- `pi/` — provider config for the agent harness
+- `models/` — GGUF model files for the local backend
+- `pi/` — configuration for the agent harness
 - `project.md` — optional one-line project description, prepended to the agent's system prompt
 
 ## License
