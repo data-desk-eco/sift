@@ -19,6 +19,7 @@ Manually: `brew install uv node llama.cpp && npm install -g @mariozechner/pi && 
 ```bash
 sift init                                                    # one-time: vault, creds, LLM backend
 sift auto "investigate Acme Corp in the Pandora Papers"      # headless one-shot
+sift auto -t 30m "investigate Acme Corp"                     # with a soft deadline
 sift auto                                                    # interactive REPL
 ```
 
@@ -27,6 +28,8 @@ sift auto                                                    # interactive REPL
 It also asks for a one-line description of the project the agent is working on — where the files come from, what you're investigating — which gets prepended to the agent's system prompt for every run. View or change it with `sift project [show|set|edit|clear]`.
 
 In headless mode the agent appends to a `report.md` inside a per-run session directory in the vault, and prints a terse `[scope] message` log to your terminal. `--debug` dumps pi's full JSON event stream instead.
+
+`-t / --time-limit` (e.g. `30m`, `1h30m`, `90s`) sets a soft deadline. The agent self-paces against it by calling `sift time` between tool calls — there's no hard kill, but it's nudged to stop opening new threads as the deadline approaches and to write `report.md` before stopping.
 
 The same tools the agent uses are available to you directly:
 

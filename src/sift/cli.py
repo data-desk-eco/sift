@@ -13,10 +13,12 @@ proper Click options."""
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import time as _time
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -31,7 +33,7 @@ from .commands import (
     cmd_sources, cmd_sql, cmd_tree,
 )
 from .errors import CommandError
-from .log_filter import stream as log_stream
+from .events import stream as log_stream
 from .report import export_report
 from .store import Store
 from .vault import Vault
@@ -223,19 +225,28 @@ def _require_dep(name: str, hint: str) -> None:
                                 "allow_extra_args": True})
 @click.argument("prompt", required=False)
 @click.option("--debug", is_flag=True, help="dump pi's raw JSON event stream")
+@click.option("--time-limit", "-t", "time_limit", default=None,
+              help="soft deadline (e.g. 30m, 1h30m, 90s); the agent self-paces against it")
 @click.pass_context
-def auto(ctx: click.Context, prompt: str | None, debug: bool) -> None:
+def auto(ctx: click.Context, prompt: str | None, debug: bool,
+         time_limit: str | None) -> None:
     """Run the agent. With PROMPT, headless one-shot; without, interactive REPL."""
+    # Parse duration first so a bad value fails before we spin up the backend.
+    deadline = _set_deadline(time_limit) if time_limit else None
+
     ensure_initialized()
     _backend.start()
     _backend.configure_pi()
 
     pi_extra = list(ctx.args)
-    sysprompt_path = _build_system_prompt()
+    sysprompt_path = _build_system_prompt(deadline=deadline)
     skill_path = _skill_dir()
 
     env = os.environ.copy()
     env["PI_CODING_AGENT_DIR"] = str(SIFT_HOME / "pi")
+    if deadline:
+        env["SIFT_DEADLINE_TS"] = str(deadline[1])
+        env["SIFT_DEADLINE_START_TS"] = str(deadline[0])
 
     # vault exec: mount, populate ALEPH_* env, chdir into the per-session
     # research dir inside the vault so the agent's relative writes (e.g.
@@ -247,6 +258,7 @@ def auto(ctx: click.Context, prompt: str | None, debug: bool) -> None:
         env.setdefault("ALEPH_SESSION", "default")
         session_dir = mp / "research" / env["ALEPH_SESSION"]
         session_dir.mkdir(parents=True, exist_ok=True)
+        env["SIFT_FINDINGS_DB"] = str(session_dir / "findings.db")
         os.chdir(session_dir)
         # Interactive REPL — replace this process with pi.
         os.execvpe("pi", [
@@ -259,6 +271,7 @@ def auto(ctx: click.Context, prompt: str | None, debug: bool) -> None:
     env["ALEPH_SESSION"] = _session_name(prompt)
     session_dir = mp / "research" / env["ALEPH_SESSION"]
     session_dir.mkdir(parents=True, exist_ok=True)
+    env["SIFT_FINDINGS_DB"] = str(session_dir / "findings.db")
     os.chdir(session_dir)
 
     proc = subprocess.Popen(
@@ -292,16 +305,124 @@ def _skill_dir() -> Path:
     return Path(str(DATA_DIR / "sift"))
 
 
-def _build_system_prompt() -> Path:
-    """Combine AGENTS.md + any project.md into a single sysprompt file."""
+def _build_system_prompt(deadline: tuple[int, int] | None = None) -> Path:
+    """Combine AGENTS.md + any project.md into a single sysprompt file.
+
+    If `deadline` is set (start_ts, end_ts), append a soft-deadline note so
+    the agent knows to call `sift time` and self-pace."""
     agents_md = (DATA_DIR / "AGENTS.md").read_text()
     project_path = SIFT_HOME / "project.md"
     parts = [agents_md]
     if project_path.exists():
         parts.append("\n\n## Project context\n\n" + project_path.read_text())
+    if deadline:
+        start, end = deadline
+        total_min = max(1, (end - start) // 60)
+        end_local = _time.strftime("%H:%M", _time.localtime(end))
+        parts.append(
+            f"\n\n## Deadline\n\n"
+            f"This session has a soft deadline of {total_min} minute(s), "
+            f"ending around {end_local} local time. After every few tool calls, "
+            f"run `sift time` to see remaining time and pacing guidance, and "
+            f"adjust depth accordingly. The deadline is soft — there's no hard "
+            f"kill — but report.md must exist by the time you stop."
+        )
     out = SIFT_HOME / "system-prompt.md"
     out.write_text("".join(parts))
     return out
+
+
+_DURATION_RE = re.compile(r"(\d+)\s*([smh])", re.IGNORECASE)
+
+
+def _parse_duration(s: str) -> int:
+    """Parse "30m", "1h30m", "90s" → seconds. Raises click.BadParameter."""
+    cleaned = s.replace(" ", "")
+    if not cleaned:
+        raise click.BadParameter("empty duration")
+    total = 0
+    consumed = 0
+    for m in _DURATION_RE.finditer(cleaned):
+        n, unit = int(m.group(1)), m.group(2).lower()
+        total += n * {"s": 1, "m": 60, "h": 3600}[unit]
+        consumed += len(m.group(0))
+    if total <= 0 or consumed != len(cleaned):
+        raise click.BadParameter(
+            f"can't parse {s!r} (try 30m, 1h, 90s, 1h30m)"
+        )
+    return total
+
+
+def _set_deadline(time_limit: str) -> tuple[int, int]:
+    """Parse --time-limit into (start_ts, end_ts). Raises on bad input."""
+    seconds = _parse_duration(time_limit)
+    start = int(_time.time())
+    return start, start + seconds
+
+
+# ---------------------------------------------------------------------------
+# time (agent self-pacing)
+# ---------------------------------------------------------------------------
+
+@cli.command("time")
+def time_cmd() -> None:
+    """Show remaining time and pacing phase for the current `sift auto` session.
+
+    Reads SIFT_DEADLINE_TS / SIFT_DEADLINE_START_TS from env. Outside a
+    timed session, prints a short notice and exits 0."""
+    raw_end = os.environ.get("SIFT_DEADLINE_TS")
+    raw_start = os.environ.get("SIFT_DEADLINE_START_TS")
+    if not (raw_end and raw_start):
+        click.echo("no deadline set for this session — pace yourself normally")
+        return
+    end = int(raw_end)
+    start = int(raw_start)
+    now = int(_time.time())
+    total = max(1, end - start)
+    remaining = end - now
+    frac = remaining / total
+
+    if remaining <= 0:
+        phase = "overrun"
+        guidance = (
+            "deadline passed — write report.md immediately if you haven't, "
+            "then stop. Don't open new threads."
+        )
+    elif frac < 0.10:
+        phase = "wrap-up"
+        guidance = (
+            "write report.md now. Finish the current tool call only; "
+            "no new searches."
+        )
+    elif frac < 0.25:
+        phase = "consolidate"
+        guidance = (
+            "stop opening new threads. Tie up loose ends and start drafting "
+            "report.md."
+        )
+    elif frac < 0.50:
+        phase = "deepen"
+        guidance = (
+            "no big new directions. Pursue the strongest existing leads "
+            "to a useful depth."
+        )
+    else:
+        phase = "explore"
+        guidance = "plenty of time. Keep going deep on the question."
+
+    rem_str = _fmt_remaining(max(0, remaining))
+    click.echo(f"remaining: {rem_str}  ({phase})")
+    click.echo(guidance)
+
+
+def _fmt_remaining(seconds: int) -> str:
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
 # ---------------------------------------------------------------------------
@@ -627,15 +748,25 @@ def cache_clear_cmd(ctx: click.Context) -> None:
 # ---------------------------------------------------------------------------
 
 @cli.command("export")
-@click.argument("src", type=click.Path(exists=True, dir_okay=False, path_type=Path),
-                default=Path("report.md"), required=False)
+@click.argument("src", type=click.Path(dir_okay=False, path_type=Path),
+                default=None, required=False)
 @click.option("--out", "-o", "dst", type=click.Path(dir_okay=False, path_type=Path),
               default=None, help="output file (default: SRC with .html extension)")
 @click.option("--server", default=None,
               help="Aleph base URL for entity links (default: ALEPH_URL from vault)")
-def export_cmd(src: Path, dst: Path | None, server: str | None) -> None:
+@click.option("--no-open", "no_open", is_flag=True,
+              help="don't pop the rendered HTML in the default browser")
+def export_cmd(src: Path | None, dst: Path | None, server: str | None,
+               no_open: bool) -> None:
     """Render report.md → report.html, turning every r-alias into a proper
-    link to the entity on its Aleph server."""
+    link to the entity on its Aleph server. With no SRC, exports the
+    current session's report (cwd if it has one, else the most recently
+    modified session under $ALEPH_SESSION_DIR)."""
+    if src is None:
+        src = _resolve_current_session_report()
+    elif not src.exists():
+        raise CommandError(f"no such file: {src}")
+
     if dst is None:
         dst = src.with_suffix(".html")
 
@@ -659,6 +790,44 @@ def export_cmd(src: Path, dst: Path | None, server: str | None) -> None:
         msg += f", {counts.unresolved} unresolved"
     msg += ")"
     click.echo(msg)
+
+    if not no_open:
+        import webbrowser
+        webbrowser.open(dst.resolve().as_uri())
+
+
+def _resolve_current_session_report() -> Path:
+    """Pick the right report.md when the user didn't name one. cwd wins if
+    it has one (covers `sift export` run inside a session dir or under
+    `sift auto`); otherwise fall back to the most recently modified
+    session under $ALEPH_SESSION_DIR."""
+    cwd_report = Path("report.md")
+    if cwd_report.exists():
+        return cwd_report
+
+    base = os.environ.get("ALEPH_SESSION_DIR")
+    if not base:
+        vault = make_vault()
+        mp = vault.find_mount()
+        if mp:
+            base = str(mp / "research")
+    if not base:
+        raise CommandError(
+            "no report.md in cwd and no session dir to search",
+            "cd into a session dir, pass an explicit path, or unlock the vault",
+        )
+
+    candidates = sorted(
+        Path(base).glob("*/report.md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        raise CommandError(
+            f"no report.md found under {base}",
+            "run `sift auto \"...\"` to create one, or pass an explicit path",
+        )
+    return candidates[0]
 
 
 # ---------------------------------------------------------------------------

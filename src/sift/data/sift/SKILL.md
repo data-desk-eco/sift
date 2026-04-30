@@ -20,6 +20,8 @@ $VAULT_MOUNT/
                           # entity in every session on this vault.
     <session>/            # one subdir per logical session (notes, reports)
       report.md           # whatever you write — exports, timelines, etc.
+      findings.db         # $SIFT_FINDINGS_DB — your structured extractions
+                          # (per-session SQLite, never shared across sessions)
 ```
 
 `sift` auto-discovers credentials from a mounted vault when run from this directory, so you do not need to export `ALEPH_URL` / `ALEPH_API_KEY` yourself.
@@ -185,6 +187,38 @@ sift cache clear [older_than_days=30]
 ```
 
 `stats` reports DB size, row counts per table, and the age range of cached responses. `clear` truncates the response cache only — entities, aliases, and edges are preserved, so aliases and graph history survive across cache clears.
+
+## Recording structured findings
+
+When you extract a structured item worth keeping — a trade, transaction, vessel, person, payment — append it to `$SIFT_FINDINGS_DB` rather than burying it in prose. The file is a per-session SQLite database that lives next to `report.md` in the session dir, so it's encrypted in the vault along with everything else. The user can dump it to CSV, open it in Datasette, or join it against `aleph.sqlite` later.
+
+```bash
+sqlite3 "$SIFT_FINDINGS_DB" "CREATE TABLE IF NOT EXISTS trades (
+  id INTEGER PRIMARY KEY,
+  buyer TEXT, seller TEXT, volume_bbl INTEGER, date TEXT,
+  source_alias TEXT
+)"
+sqlite3 "$SIFT_FINDINGS_DB" \
+  "INSERT INTO trades(buyer, seller, volume_bbl, date, source_alias)
+   VALUES ('Acme', 'X Corp', 50000, '2024-03-12', 'd3491')"
+```
+
+Conventions:
+
+- One table per kind of thing (`trades`, `vessels`, `payments`, `people`).
+- Always include a `source_alias` column referencing the alias you saw the row in (`r5`, `d3491`, …) so the user can audit and re-open the source.
+- Don't design the schema up front. As new fields appear, run `ALTER TABLE <name> ADD COLUMN <field> <type>` — sqlite handles this fine and existing rows just get `NULL` for the new column.
+- This is your scratchpad, not Aleph's mirror — denormalised columns, free-text notes, confidence scores, whatever helps the user is fair game.
+
+## Pacing
+
+If the session has a deadline, the system prompt will say so. Run `sift time` every few tool calls to see remaining time and a phase hint:
+
+```
+sift time
+```
+
+Phases: **explore** (>50% left, push deep), **deepen** (25–50%, no new directions), **consolidate** (10–25%, tie up and start drafting), **wrap-up** (<10%, write report.md and stop). Outside a timed session, `sift time` reports no deadline — pace normally.
 
 ## Aleph quirks worth knowing
 
