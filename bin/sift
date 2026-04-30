@@ -18,12 +18,12 @@
 set -euo pipefail
 
 SIFT_HOME="${SIFT_HOME:-$HOME/.sift}"
-SIFT_BACKEND="${SIFT_BACKEND:-llamacpp}"
 SIFT_PORT="${SIFT_PORT:-1234}"
+SIFT_BACKEND_FILE="$SIFT_HOME/backend.json"
 
-# Default model — Qwen3.6 35B A3B (MoE; ~3B active), unsloth UD-Q2_K_XL
-# quant. ~12.3 GB on disk, comfortable on a 24 GB Mac alongside a 32k
-# context window.
+# Recommended local model — Qwen3.6 35B A3B (MoE; ~3B active), unsloth
+# UD-Q2_K_XL quant. ~12.3 GB on disk, comfortable on a 24 GB Mac alongside
+# a 32k context window. Used when the user picks the local backend at init.
 DEFAULT_MODEL_REPO="unsloth/Qwen3.6-35B-A3B-GGUF"
 DEFAULT_MODEL_FILE="Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
 DEFAULT_MODEL_NAME="qwen3.6-35b-a3b"
@@ -99,31 +99,61 @@ backend_start_lmstudio() {
   fi
 }
 
+# Read a string field from $SIFT_BACKEND_FILE. Empty if the file or key is
+# missing — callers should validate.
+backend_get() {
+  python3 -c "import json,sys
+try: print(json.load(open('$SIFT_BACKEND_FILE')).get('$1',''))
+except Exception: pass"
+}
+
 backend_start() {
-  case "$SIFT_BACKEND" in
-    llamacpp) backend_start_llamacpp ;;
-    lmstudio) backend_start_lmstudio ;;
-    *) die "unknown SIFT_BACKEND: $SIFT_BACKEND (expected llamacpp or lmstudio)" ;;
+  [[ -f "$SIFT_BACKEND_FILE" ]] || die "no backend configured — run 'sift init' or 'sift backend'"
+  local kind
+  kind=$(backend_get kind)
+  case "$kind" in
+    local)  backend_start_llamacpp ;;
+    hosted) :;;  # nothing to spin up; configure_pi will point pi at the URL
+    *) die "unknown backend kind: $kind (try 'sift backend' to reconfigure)" ;;
   esac
 }
 
-# Write pi's provider config so it talks to whichever backend is running.
-# Idempotent — overwritten every run so the port stays in sync.
+# Write pi's provider config so it talks to the configured backend.
+# Idempotent — overwritten every run so the port stays in sync for local.
 configure_pi() {
   mkdir -p "$SIFT_HOME/pi"
+  local kind base_url api_key model_name display_name
+  kind=$(backend_get kind)
+  if [[ "$kind" == "local" ]]; then
+    base_url="http://127.0.0.1:$SIFT_PORT/v1"
+    api_key="sift-local"
+    model_name=$(backend_get model_name)
+    display_name="Qwen3.6 35B A3B (local)"
+  else
+    base_url=$(backend_get base_url)
+    api_key=$(backend_get api_key)
+    model_name=$(backend_get model_name)
+    display_name="$model_name"
+  fi
+  # Escape any embedded double-quotes in user-supplied strings before
+  # interpolating into the JSON heredoc.
+  base_url=${base_url//\"/\\\"}
+  api_key=${api_key//\"/\\\"}
+  model_name=${model_name//\"/\\\"}
+  display_name=${display_name//\"/\\\"}
   cat >"$SIFT_HOME/pi/models.json" <<JSON
 {
   "providers": {
     "sift": {
-      "baseUrl": "http://127.0.0.1:$SIFT_PORT/v1",
+      "baseUrl": "$base_url",
       "api": "openai-completions",
-      "apiKey": "sift-local",
+      "apiKey": "$api_key",
       "compat": {
         "supportsDeveloperRole": false,
         "supportsReasoningEffort": false
       },
       "models": [
-        {"id": "$DEFAULT_MODEL_NAME", "name": "Qwen3.6 35B A3B"}
+        {"id": "$model_name", "name": "$display_name"}
       ]
     }
   }
@@ -132,7 +162,7 @@ JSON
   cat >"$SIFT_HOME/pi/settings.json" <<JSON
 {
   "defaultProvider": "sift",
-  "defaultModel": "$DEFAULT_MODEL_NAME"
+  "defaultModel": "$model_name"
 }
 JSON
 }
@@ -141,15 +171,104 @@ JSON
 # Subcommands
 # ---------------------------------------------------------------------------
 
+# Read a (possibly hidden) line of input. With piped stdin (scripted setup)
+# stty errors are suppressed and echo control is skipped.
+read_secret() {
+  local var="$1"
+  if [[ -t 0 ]]; then
+    stty -echo
+    read -r "$var"
+    stty echo
+    printf '\n'
+  else
+    read -r "$var"
+  fi
+}
+
+backend_init_local() {
+  if ! command -v llama-server >/dev/null 2>&1; then
+    log init "installing llama.cpp via Homebrew (one-time)"
+    brew install llama.cpp >/dev/null
+  fi
+  mkdir -p "$SIFT_HOME/models"
+  local model_path="$SIFT_HOME/models/$DEFAULT_MODEL_FILE"
+  if [[ ! -f "$model_path" ]]; then
+    log init "downloading model (~12GB) — go get a coffee"
+    # Resolve the HF redirect to the signed CDN URL first, then download
+    # in one shot. Without this, curl's --progress-bar shows a misleading
+    # 100% bar for the small redirect document before the real download
+    # of the 12GB file even starts.
+    local resolved_url
+    resolved_url=$(curl -fsLI \
+      "https://huggingface.co/$DEFAULT_MODEL_REPO/resolve/main/$DEFAULT_MODEL_FILE" \
+      -o /dev/null -w '%{url_effective}')
+    [[ -n "$resolved_url" ]] || die "couldn't resolve model URL on huggingface.co"
+    curl --fail --progress-bar --retry 5 --retry-all-errors \
+      -o "$model_path.partial" "$resolved_url"
+    mv "$model_path.partial" "$model_path"
+  else
+    log init "model already downloaded"
+  fi
+  cat >"$SIFT_BACKEND_FILE" <<JSON
+{
+  "kind": "local",
+  "model_file": "$DEFAULT_MODEL_FILE",
+  "model_name": "$DEFAULT_MODEL_NAME"
+}
+JSON
+  chmod 600 "$SIFT_BACKEND_FILE"
+}
+
+backend_init_hosted() {
+  local base_url api_key model_name
+  printf 'OpenAI-compatible base URL (e.g. https://api.openai.com/v1): '
+  read -r base_url
+  [[ -n "$base_url" ]] || die "base URL required"
+  printf 'API key (input hidden, leave blank for none): '
+  read_secret api_key
+  printf 'Model name (e.g. gpt-4o, llama-3.3-70b): '
+  read -r model_name
+  [[ -n "$model_name" ]] || die "model name required"
+
+  log init "checking endpoint..."
+  local probe_rc=0
+  if [[ -n "$api_key" ]]; then
+    curl -fsS -H "Authorization: Bearer $api_key" "$base_url/models" >/dev/null 2>&1 || probe_rc=$?
+  else
+    curl -fsS "$base_url/models" >/dev/null 2>&1 || probe_rc=$?
+  fi
+  [[ $probe_rc -eq 0 ]] || die "couldn't reach $base_url/models — check URL and key"
+
+  cat >"$SIFT_BACKEND_FILE" <<JSON
+{
+  "kind": "hosted",
+  "base_url": "$base_url",
+  "api_key": "$api_key",
+  "model_name": "$model_name"
+}
+JSON
+  chmod 600 "$SIFT_BACKEND_FILE"
+}
+
+backend_choose_interactive() {
+  printf '\nLLM backend:\n'
+  printf '  [1] local llama.cpp + Qwen3.6 35B (recommended; ~12 GB download)\n'
+  printf '  [2] hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …)\n'
+  printf 'Choose [1]: '
+  local choice
+  read -r choice
+  case "${choice:-1}" in
+    1) backend_init_local ;;
+    2) backend_init_hosted ;;
+    *) die "invalid choice: $choice" ;;
+  esac
+}
+
 cmd_init() {
   log init "checking dependencies"
   require uv     "brew install uv"
   require pi     "npm install -g @mariozechner/pi"
   require swiftc "xcode-select --install"
-  case "$SIFT_BACKEND" in
-    llamacpp) require llama-server "brew install llama.cpp" ;;
-    lmstudio) require lms          "https://lmstudio.ai/" ;;
-  esac
 
   mkdir -p "$SIFT_HOME"
 
@@ -163,46 +282,34 @@ cmd_init() {
 
   log init "configuring Aleph credentials"
   printf 'Aleph URL [https://aleph.occrp.org]: '
+  local aleph_url aleph_key
   read -r aleph_url
   aleph_url="${aleph_url:-https://aleph.occrp.org}"
   printf 'Aleph API key (input hidden): '
-  if [[ -t 0 ]]; then
-    stty -echo
-    read -r aleph_key
-    stty echo
-    printf '\n'
-  else
-    # Piped stdin (e.g. a colleague scripting setup) — no echo control needed.
-    read -r aleph_key
-  fi
-  [[ -n "$aleph_key" ]] || die "API key required"
+  read_secret aleph_key
+  [[ -n "$aleph_key" ]] || die "Aleph API key required"
   "$SKILL/aleph" vault set ALEPH_URL     "$aleph_url" >/dev/null
   "$SKILL/aleph" vault set ALEPH_API_KEY "$aleph_key" >/dev/null
 
-  if [[ "$SIFT_BACKEND" == "llamacpp" ]]; then
-    mkdir -p "$SIFT_HOME/models"
-    local model_path="$SIFT_HOME/models/$DEFAULT_MODEL_FILE"
-    if [[ ! -f "$model_path" ]]; then
-      log init "downloading model (~12GB) — go get a coffee"
-      # Resolve the HF redirect to the signed CDN URL first, then download
-      # in one shot. Without this, curl's --progress-bar shows a misleading
-      # 100% bar for the small redirect document before the real download
-      # of the 12GB file even starts.
-      local resolved_url
-      resolved_url=$(curl -fsLI \
-        "https://huggingface.co/$DEFAULT_MODEL_REPO/resolve/main/$DEFAULT_MODEL_FILE" \
-        -o /dev/null -w '%{url_effective}')
-      [[ -n "$resolved_url" ]] || die "couldn't resolve model URL on huggingface.co"
-      curl --fail --progress-bar --retry 5 --retry-all-errors \
-        -o "$model_path.partial" "$resolved_url"
-      mv "$model_path.partial" "$model_path"
-    else
-      log init "model already downloaded"
-    fi
+  if [[ -f "$SIFT_BACKEND_FILE" ]]; then
+    log init "backend already configured (use 'sift backend' to change)"
+  else
+    backend_choose_interactive
   fi
 
   touch "$SIFT_HOME/.initialized"
-  log init "done — try: sift \"investigate <subject>\""
+  log init "done — try: sift auto \"investigate <subject>\""
+}
+
+cmd_backend() {
+  case "${1:-}" in
+    ""|show)
+      [[ -f "$SIFT_BACKEND_FILE" ]] || die "no backend configured — run 'sift init' or 'sift backend local|hosted'"
+      cat "$SIFT_BACKEND_FILE" ;;
+    local)   backend_init_local ;;
+    hosted)  backend_init_hosted ;;
+    *) die "usage: sift backend [show|local|hosted]" ;;
+  esac
 }
 
 cmd_auto() {
@@ -258,12 +365,17 @@ usage() {
 sift — investigative research agent that runs entirely on your Mac.
 
 Setup:
-  sift init                              one-time: vault, creds, model
+  sift init                              one-time: vault, creds, LLM backend
 
 Agent (headless or REPL):
   sift auto "investigate Acme Corp..."   headless one-shot
   sift auto                              interactive REPL
   sift auto --debug "..."                + raw JSON event stream
+
+Backend management:
+  sift backend                           show current backend config
+  sift backend local                     switch to local llama.cpp + Qwen3.6
+  sift backend hosted                    switch to a hosted OpenAI-compatible endpoint
 
 Aleph tools (also available to the agent):
   sift search query="..." [type=...] [collection=...]
@@ -274,8 +386,7 @@ Aleph tools (also available to the agent):
 
 Environment:
   SIFT_HOME     where the vault, model, and pi config live (default ~/.sift)
-  SIFT_BACKEND  llamacpp (default) or lmstudio
-  SIFT_PORT     local LLM server port (default 1234)
+  SIFT_PORT     local LLM server port (default 1234, local backend only)
 EOF
 }
 
@@ -290,6 +401,8 @@ case "${1:-}" in
     shift; cmd_init "$@" ;;
   auto)
     shift; cmd_auto "$@" ;;
+  backend)
+    shift; cmd_backend "$@" ;;
   search|read|expand|browse|tree|similar|hubs|sources|vault)
     # Forward to the bundled aleph CLI. ALEPH_PROJECT_DIR is exported at
     # the top of this script, so the vault is found regardless of cwd.
