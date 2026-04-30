@@ -10,7 +10,9 @@ It's the same surface for humans and agents: `sift search`, `sift read`, `sift v
 curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
 ```
 
-Or by hand: `brew install --HEAD data-desk-eco/tap/sift` — the qualified name is necessary because `homebrew-core` already ships an unrelated `sift` (a `grep` alternative).
+The installer brings in runtime dependencies via Homebrew (`uv`, `node`, `llama.cpp`) and the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness via npm, then installs sift itself with `uv tool install`. Make sure `~/.local/bin` is on your `PATH`.
+
+Manually: `brew install uv node llama.cpp && npm install -g @mariozechner/pi && uv tool install git+https://github.com/data-desk-eco/sift`.
 
 ## Quick start
 

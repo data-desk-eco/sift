@@ -12,6 +12,7 @@ import plistlib
 import secrets as _secrets
 import subprocess
 import sys
+from importlib.resources import files
 from pathlib import Path
 
 from .errors import CommandError
@@ -21,14 +22,14 @@ class Vault:
     SPARSEIMAGE_NAME = ".vault.sparseimage"
     DEFAULT_SIZE = "20g"
 
-    def __init__(self, project_dir: Path, share_dir: Path) -> None:
+    def __init__(self, project_dir: Path) -> None:
         # Project dir = where .vault.sparseimage lives (project-specific data).
         self.project_dir = project_dir
         self.sparseimage = project_dir / self.SPARSEIMAGE_NAME
-        # Share dir = where touchid.swift ships. Stable across projects;
-        # the same package serves any number of vaults.
-        self.touchid_src = share_dir / "touchid.swift"
-        self.touchid_bin = share_dir / "touchid"
+        # touchid.swift ships as package data (read-only); the compiled
+        # helper goes into project_dir, which is writable.
+        self.touchid_src = Path(str(files("sift") / "data" / "touchid.swift"))
+        self.touchid_bin = project_dir / "touchid"
         # Project hash disambiguates multiple vaults on /Volumes and lets the
         # passphrase file live outside the project dir (where it'd be a real
         # security regression to colocate with the sparseimage).
@@ -97,7 +98,7 @@ class Vault:
         if not self.touchid_src.exists():
             raise CommandError(
                 f"missing touchid source at {self.touchid_src}",
-                "expected at <package>/share/touchid.swift",
+                "package install is broken — try reinstalling sift",
             )
         needs_build = (
             not self.touchid_bin.exists()

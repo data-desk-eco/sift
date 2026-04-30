@@ -2,5 +2,8 @@
 *.swp
 .vault.sparseimage
 .vault.sparsebundle
-share/touchid
 __pycache__/
+*.egg-info/
+dist/
+build/
+.venv/

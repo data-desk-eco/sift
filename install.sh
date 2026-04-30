@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# sift installer — bootstraps Homebrew (if needed) and installs sift.
+# sift installer — bootstraps Homebrew (for runtime deps) and uv, then
+# installs sift itself with `uv tool install`.
 # Run via:  curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
 
 set -euo pipefail
@@ -19,18 +20,35 @@ if ! command -v brew >/dev/null 2>&1; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-echo "Installing sift from data-desk-eco/tap..."
-# Qualified name avoids a collision with homebrew-core's `sift` (the Go
-# debugger). --HEAD until v0.1.0 is tagged with a real tarball sha256.
-brew install --HEAD data-desk-eco/tap/sift
+# Runtime deps. uv ships sift; pi is the agent harness; llama.cpp serves
+# the local model; node is needed for the npm-installed pi.
+echo "Installing runtime dependencies via Homebrew..."
+brew install uv node llama.cpp >/dev/null
+
+if ! command -v pi >/dev/null 2>&1; then
+  echo "Installing the pi agent harness..."
+  npm install -g @mariozechner/pi
+fi
+
+# If a previous (pre-0.2) Homebrew-installed sift is on PATH, get rid of
+# it so the uv-installed binary wins.
+if brew list --formula 2>/dev/null | grep -qx sift; then
+  echo "Removing legacy Homebrew sift install..."
+  brew uninstall sift >/dev/null
+fi
+
+echo "Installing sift..."
+uv tool install --force git+https://github.com/data-desk-eco/sift
 
 cat <<'EOF'
 
-sift installed. Next:
+sift installed. Make sure ~/.local/bin is on your PATH (uv tool's default).
+
+Next:
 
   sift init                       # one-time: vault, Aleph credentials, model (~12GB)
   sift auto "investigate ..."     # headless one-shot
   sift auto                       # interactive REPL
-  sift --help                     # full command list, including direct research tools
+  sift --help                     # full command list
 
 EOF
