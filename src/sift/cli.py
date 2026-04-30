@@ -646,6 +646,11 @@ def export_cmd(src: Path, dst: Path | None, server: str | None) -> None:
             mp = vault.find_mount()
             if mp:
                 server = (vault.read_secrets(mp) or {}).get("ALEPH_URL")
+    if not server:
+        raise CommandError(
+            "no Aleph server URL — can't build entity links",
+            "pass --server https://aleph.example.org or set ALEPH_URL in the vault",
+        )
 
     store = Store(session_db_path())
     counts = export_report(src, dst, store, default_server=server)

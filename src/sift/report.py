@@ -25,15 +25,18 @@ ALIAS_RE = re.compile(r"\br(\d+)\b")
 class AliasLink:
     alias: str
     entity_id: str
-    server: str | None
     schema: str | None
     name: str | None
 
-    def url(self, default_server: str | None) -> str | None:
-        srv = (self.server or default_server or "").rstrip("/")
-        if not srv:
+    def url(self, server: str | None) -> str | None:
+        if not server:
             return None
-        return f"{srv}/entities/{self.entity_id}"
+        # The web UI lives at the bare host; an `/api/2` suffix is for the
+        # JSON API and won't render entity pages, so strip it if present.
+        base = re.sub(r"/api/v?\d+/?$", "", server.rstrip("/"))
+        if not base:
+            return None
+        return f"{base}/entities/{self.entity_id}"
 
     def title(self) -> str:
         bits = [self.entity_id]
@@ -47,8 +50,7 @@ class AliasLink:
 def _lookup(store: Store, alias: str) -> AliasLink | None:
     row = store.conn.execute(
         """SELECT a.alias AS alias, a.entity_id AS entity_id,
-                  e.schema AS schema, e.name AS name, e.caption AS caption,
-                  e.server AS server
+                  e.schema AS schema, e.name AS name, e.caption AS caption
              FROM aliases a
              LEFT JOIN entities e ON e.id = a.entity_id
              WHERE a.alias = ?""",
@@ -59,7 +61,6 @@ def _lookup(store: Store, alias: str) -> AliasLink | None:
     return AliasLink(
         alias=row["alias"],
         entity_id=row["entity_id"],
-        server=row["server"],
         schema=row["schema"],
         name=row["name"] or row["caption"],
     )
