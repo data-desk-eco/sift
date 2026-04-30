@@ -283,11 +283,11 @@ def _session_name(prompt: str) -> str:
 
 
 def _skill_dir() -> Path:
-    """The directory pi's --skill points at. Has to contain SKILL.md and
-    nothing else pi might mistake for a second skill — that's why we
-    isolate it under data/skill/ rather than handing pi the whole data dir
-    (where AGENTS.md and touchid.swift would also live)."""
-    return Path(str(DATA_DIR / "skill"))
+    """The directory pi's --skill points at. pi requires the directory
+    name to match the skill name (i.e. `sift`), and to contain only
+    SKILL.md — siblings like AGENTS.md or touchid.swift trip pi's
+    skill-conflict check."""
+    return Path(str(DATA_DIR / "sift"))
 
 
 def _build_system_prompt() -> Path:
