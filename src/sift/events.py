@@ -33,9 +33,8 @@ def _log(scope: str, msg: str = "") -> str:
 
 
 def stream(lines: Iterable[str], debug: bool = False) -> Iterable[str]:
-    """Yield formatted lines for each event in `lines`. State (turn
-    counter, accumulated final message) is folded into the iterator."""
-    turn = 0
+    """Yield formatted lines for each event in `lines`. State (the
+    accumulated final message) is folded into the iterator."""
     final_text_parts: list[str] = []
 
     for raw in lines:
@@ -59,9 +58,6 @@ def stream(lines: Iterable[str], debug: bool = False) -> Iterable[str]:
             yield _log("session", (ev.get("id") or "")[:8])
         elif t == "agent_start":
             yield _log("agent", "start")
-        elif t == "turn_start":
-            turn += 1
-            yield _log("turn", str(turn))
         elif t == "tool_execution_start":
             name = ev.get("toolName", "?")
             yield _log("tool", f"{name}: {_args_preview(ev.get('args'))}")

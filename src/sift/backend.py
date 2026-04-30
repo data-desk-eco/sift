@@ -150,7 +150,7 @@ def start_local() -> None:
     """Spawn llama-server detached, write pidfile, poll until ready."""
     port = _local_port()
     if health_check(port):
-        click.echo(f"[server]   llama-server already up on :{port}")
+        click.echo(f"[server]  llama-server already up on :{port}")
         return
     model_path = SIFT_HOME / "models" / DEFAULT_MODEL_FILE
     if not model_path.exists():
@@ -160,7 +160,7 @@ def start_local() -> None:
         )
     log_path = SIFT_HOME / "llama-server.log"
     pid_path = SIFT_HOME / "llama-server.pid"
-    click.echo(f"[server]   starting llama-server on :{port} (logs: {log_path})")
+    click.echo(f"[server]  starting llama-server on :{port} (logs: {log_path})")
     log = open(log_path, "ab")
     proc = subprocess.Popen(
         [
@@ -182,7 +182,7 @@ def start_local() -> None:
     for _ in range(120):
         time.sleep(1)
         if health_check(port):
-            click.echo("[server]   ready")
+            click.echo("[server]  ready")
             return
     raise CommandError(
         f"llama-server didn't become ready in 120s",
@@ -219,7 +219,7 @@ def _ensure_llamacpp() -> None:
             "llama-server not installed and Homebrew not found",
             "install Homebrew, or install llama.cpp manually",
         )
-    click.echo("[init]     installing llama.cpp via Homebrew (one-time)")
+    click.echo("[init]    installing llama.cpp via Homebrew (one-time)")
     subprocess.run(["brew", "install", "llama.cpp"], check=True)
 
 
@@ -228,9 +228,9 @@ def _download_model() -> None:
     models_dir.mkdir(parents=True, exist_ok=True)
     model_path = models_dir / DEFAULT_MODEL_FILE
     if model_path.exists():
-        click.echo("[init]     model already downloaded")
+        click.echo("[init]    model already downloaded")
         return
-    click.echo("[init]     downloading model (~12GB) — go get a coffee")
+    click.echo("[init]    downloading model (~12GB)")
     # Resolve HF redirect first so curl's progress bar tracks the real
     # download, not the redirect document.
     resolve_url = (
@@ -273,7 +273,7 @@ def setup_hosted_interactive() -> None:
     if not model_name:
         raise CommandError("model name required")
 
-    click.echo("[init]     checking endpoint...")
+    click.echo("[init]    checking endpoint...")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         resp = requests.get(f"{base_url.rstrip('/')}/models",
