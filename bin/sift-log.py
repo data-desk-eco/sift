@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-delve-log: filter pi's --mode json event stream into terse `[scope] message`
-log lines so headless runs aren't silent. With DELVE_DEBUG=1, dump every
+sift-log: filter pi's --mode json event stream into terse `[scope] message`
+log lines so headless runs aren't silent. With SIFT_DEBUG=1, dump every
 event as raw JSON (one per line) instead.
 """
 import json
 import os
 import sys
 
-DEBUG = os.environ.get("DELVE_DEBUG") == "1"
+DEBUG = os.environ.get("SIFT_DEBUG") == "1"
 
 
 def short(s, n=100):
