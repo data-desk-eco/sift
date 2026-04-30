@@ -1,6 +1,8 @@
 # sift
 
-An investigative research agent for OCCRP [Aleph](https://aleph.occrp.org). Drives the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness with an [Aleph skill](share/aleph/SKILL.md) to search, read, and pivot through documents and entities. The LLM is your choice: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves your machine but Aleph queries) or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …). Credentials and findings live in an encrypted sparseimage at `~/.sift`.
+A CLI for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/) — search documents, emails, and entities, follow extracted links, browse folder trees. Credentials and findings live in an encrypted sparseimage at `~/.sift`.
+
+It's the same surface for humans and agents: `sift search`, `sift read`, `sift vault …` are what you type at the prompt, and they're also what an agent calls when you run `sift auto "investigate …"`. Self-automating: `sift auto` drives the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) harness with [a small skill file](share/SKILL.md) and lets the agent loop over the same `sift` you use directly. The LLM backend is your choice — a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves your machine but Aleph queries) or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …).
 
 ## Install
 
@@ -22,7 +24,7 @@ sift auto                                                    # interactive REPL
 
 In headless mode the agent appends to a `report.md` inside a per-run session directory in the vault, and prints a terse `[scope] message` log to your terminal. `--debug` dumps pi's full JSON event stream instead.
 
-The aleph tools the agent uses are also available to you directly:
+The same tools the agent uses are available to you directly:
 
 ```bash
 sift search query="..." [collection=<id>]
@@ -36,7 +38,7 @@ See `sift --help` for the full list, or `sift <cmd> --help` for per-command flag
 
 - macOS 13 or newer on Apple Silicon
 - For the local backend: ≥24 GB unified memory (the default model uses ~14 GB at runtime)
-- An Aleph account with an API key
+- An Aleph or OpenAleph account with an API key
 
 ## Configuration
 

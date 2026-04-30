@@ -1,11 +1,11 @@
 ---
-name: aleph
-description: Search and read documents, emails, and entities on an OCCRP Aleph instance, with an encrypted vault for credentials and research products. Use when investigating a subject in a leaked dataset or public corpus — query for hits, read full bodies, follow Aleph's extracted links between people, organisations, and documents, browse folder trees, find name variants. Tools chain naturally — search → read → expand → search again — and the project-local vault keeps API keys and notes encrypted at rest.
+name: sift
+description: Investigate a subject in an Aleph or OpenAleph collection — search and read documents, emails, and entities, follow extracted links between people/orgs/documents, browse folder trees, find name variants. Tools chain naturally — search → read → expand → search again — and the encrypted vault keeps API keys and research products at rest.
 ---
 
-# Aleph
+# sift
 
-Investigate a subject inside an [Aleph](https://aleph.occrp.org) collection and keep credentials + research products in an AES-256 encrypted volume. The CLI is `sift` (already on your PATH).
+Investigate a subject inside an [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/) collection and keep credentials + research products in an AES-256 encrypted volume. The CLI is `sift` (already on your PATH).
 
 ## Where things live
 

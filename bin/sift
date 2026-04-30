@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# sift — investigative research agent that runs entirely on your Mac.
+# sift — investigative research agent for OCCRP Aleph or OpenAleph.
 #
-# Talks to an OCCRP Aleph instance through Mario Zechner's `pi` agent
-# harness, with a local Qwen3.6 35B A3B served by llama.cpp. Credentials
-# and research products live in an encrypted sparseimage vault at
-# ~/.sift/.vault.sparseimage; nothing leaves your machine except the
-# Aleph API queries themselves.
+# A CLI for both humans and agents. The agent loop is just sift driving
+# itself: pi (Mario Zechner's harness) calls back into `sift <cmd>` with
+# the same surface a human would use. LLM backend is configurable —
+# local Qwen3.6 35B via llama.cpp (default; nothing leaves your machine
+# but Aleph queries) or any hosted OpenAI-compatible endpoint.
+# Credentials and research products live in an encrypted sparseimage
+# vault at ~/.sift/.vault.sparseimage.
 #
-#   sift init                       # one-time setup (vault, creds, model)
-#   sift "investigate Acme Corp..." # headless one-shot
-#   sift                            # interactive REPL
-#   sift --debug "..."              # headless + raw JSON event stream
+#   sift init                            # one-time setup (vault, creds, backend)
+#   sift auto "investigate Acme Corp..." # headless one-shot
+#   sift auto                            # interactive REPL
+#   sift auto --debug "..."              # + raw JSON event stream
 #
 # Each headless invocation gets its own session directory inside the
 # vault (timestamp + slug), so runs don't stomp on each other.
@@ -22,21 +24,22 @@ SIFT_PORT="${SIFT_PORT:-1234}"
 SIFT_BACKEND_FILE="$SIFT_HOME/backend.json"
 
 # Recommended local model — Qwen3.6 35B A3B (MoE; ~3B active), unsloth
-# UD-Q2_K_XL quant. ~12.3 GB on disk, comfortable on a 24 GB Mac alongside
-# a 32k context window. Used when the user picks the local backend at init.
+# UD-Q2_K_XL quant. ~12.3 GB on disk, fits on a 24 GB Mac alongside a
+# 128k context window. Used when the user picks the local backend at init.
 DEFAULT_MODEL_REPO="unsloth/Qwen3.6-35B-A3B-GGUF"
 DEFAULT_MODEL_FILE="Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
 DEFAULT_MODEL_NAME="qwen3.6-35b-a3b"
 
-# Resolve where the package lives (Homebrew installs to libexec; binary is
-# symlinked into bin/). realpath -> .../libexec/bin/sift -> .../libexec.
-SIFT_PACKAGE="$(cd "$(dirname "$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$0")")/.." && pwd)"
-SKILL="$SIFT_PACKAGE/share/aleph"
-AGENTS_MD="$SIFT_PACKAGE/share/AGENTS.md"
+# Resolve where the package lives. Under Homebrew the binary symlinked
+# onto PATH points at <libexec>/bin/sift; we want <libexec>.
+SIFT_PACKAGE="$(/usr/bin/python3 -c 'import os, sys; print(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))' "$0")"
+SIFT_TOOL="$SIFT_PACKAGE/bin/sift-tool"
+SKILL="$SIFT_PACKAGE/share"
+AGENTS_MD="$SKILL/AGENTS.md"
 
-# Every sift subcommand that talks to aleph (search, read, vault, …) needs
-# this so the bundled CLI finds the vault at $SIFT_HOME/.vault.sparseimage
-# instead of walking up from the caller's cwd.
+# Every research/vault subcommand needs this so the bundled tool finds the
+# vault at $SIFT_HOME/.vault.sparseimage instead of walking up from the
+# caller's cwd.
 export ALEPH_PROJECT_DIR="$SIFT_HOME"
 
 log() { printf '%-9s %s\n' "[$1]" "$2"; }
@@ -74,7 +77,7 @@ backend_start_llamacpp() {
     --port "$SIFT_PORT" \
     --jinja \
     --no-webui \
-    --ctx-size 32768 \
+    --ctx-size 131072 \
     --reasoning-budget 16384 \
     --alias "$DEFAULT_MODEL_NAME" \
     >"$SIFT_HOME/llama-server.log" 2>&1 &
@@ -84,19 +87,6 @@ backend_start_llamacpp() {
     backend_health && { log server "ready"; return; }
   done
   die "llama-server didn't become ready in 120s — check $SIFT_HOME/llama-server.log"
-}
-
-backend_start_lmstudio() {
-  require lms "https://lmstudio.ai/"
-  local server_msg port
-  server_msg=$(lms server start 2>&1 || true)
-  port=$(printf '%s' "$server_msg" | grep -oE 'port [0-9]+' | head -n1 | awk '{print $2}')
-  if [[ -n "$port" ]]; then
-    SIFT_PORT="$port"
-    log server "running on :$port"
-  else
-    log server "$server_msg"
-  fi
 }
 
 # Read a string field from $SIFT_BACKEND_FILE. Empty if the file or key is
@@ -122,49 +112,35 @@ backend_start() {
 # Idempotent — overwritten every run so the port stays in sync for local.
 configure_pi() {
   mkdir -p "$SIFT_HOME/pi"
-  local kind base_url api_key model_name display_name
-  kind=$(backend_get kind)
-  if [[ "$kind" == "local" ]]; then
-    base_url="http://127.0.0.1:$SIFT_PORT/v1"
-    api_key="sift-local"
-    model_name=$(backend_get model_name)
-    display_name="Qwen3.6 35B A3B (local)"
-  else
-    base_url=$(backend_get base_url)
-    api_key=$(backend_get api_key)
-    model_name=$(backend_get model_name)
-    display_name="$model_name"
-  fi
-  # Escape any embedded double-quotes in user-supplied strings before
-  # interpolating into the JSON heredoc.
-  base_url=${base_url//\"/\\\"}
-  api_key=${api_key//\"/\\\"}
-  model_name=${model_name//\"/\\\"}
-  display_name=${display_name//\"/\\\"}
-  cat >"$SIFT_HOME/pi/models.json" <<JSON
-{
-  "providers": {
-    "sift": {
-      "baseUrl": "$base_url",
-      "api": "openai-completions",
-      "apiKey": "$api_key",
-      "compat": {
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
-      },
-      "models": [
-        {"id": "$model_name", "name": "$display_name"}
-      ]
-    }
-  }
-}
-JSON
-  cat >"$SIFT_HOME/pi/settings.json" <<JSON
-{
-  "defaultProvider": "sift",
-  "defaultModel": "$model_name"
-}
-JSON
+  SIFT_HOME="$SIFT_HOME" SIFT_PORT="$SIFT_PORT" \
+    SIFT_BACKEND_FILE="$SIFT_BACKEND_FILE" \
+    python3 - <<'PY'
+import json, os
+home = os.environ["SIFT_HOME"]
+backend = json.load(open(os.environ["SIFT_BACKEND_FILE"]))
+if backend["kind"] == "local":
+    base_url = f'http://127.0.0.1:{os.environ["SIFT_PORT"]}/v1'
+    api_key = "sift-local"
+    display = "Qwen3.6 35B A3B (local)"
+else:
+    base_url = backend["base_url"]
+    api_key = backend.get("api_key", "")
+    display = backend["model_name"]
+model = backend["model_name"]
+json.dump({
+    "providers": {"sift": {
+        "baseUrl": base_url,
+        "api": "openai-completions",
+        "apiKey": api_key,
+        "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False},
+        "models": [{"id": model, "name": display}],
+    }},
+}, open(f"{home}/pi/models.json", "w"), indent=2)
+json.dump(
+    {"defaultProvider": "sift", "defaultModel": model},
+    open(f"{home}/pi/settings.json", "w"), indent=2,
+)
+PY
 }
 
 # ---------------------------------------------------------------------------
@@ -274,11 +250,11 @@ cmd_init() {
 
   if [[ ! -f "$SIFT_HOME/.vault.sparseimage" ]]; then
     log init "creating encrypted vault at $SIFT_HOME/.vault.sparseimage"
-    "$SKILL/aleph" vault init >/dev/null
+    "$SIFT_TOOL" vault init >/dev/null
   else
     log init "vault already exists"
   fi
-  "$SKILL/aleph" vault unlock >/dev/null
+  "$SIFT_TOOL" vault unlock >/dev/null
 
   log init "configuring Aleph credentials"
   printf 'Aleph URL [https://aleph.occrp.org]: '
@@ -288,8 +264,8 @@ cmd_init() {
   printf 'Aleph API key (input hidden): '
   read_secret aleph_key
   [[ -n "$aleph_key" ]] || die "Aleph API key required"
-  "$SKILL/aleph" vault set ALEPH_URL     "$aleph_url" >/dev/null
-  "$SKILL/aleph" vault set ALEPH_API_KEY "$aleph_key" >/dev/null
+  "$SIFT_TOOL" vault set ALEPH_URL     "$aleph_url" >/dev/null
+  "$SIFT_TOOL" vault set ALEPH_API_KEY "$aleph_key" >/dev/null
 
   if [[ -f "$SIFT_BACKEND_FILE" ]]; then
     log init "backend already configured (use 'sift backend' to change)"
@@ -336,7 +312,7 @@ cmd_auto() {
 
   if [[ -z "$prompt" ]]; then
     # Interactive REPL — drop straight into pi.
-    exec "$SKILL/aleph" vault exec pi \
+    exec "$SIFT_TOOL" vault exec pi \
       --append-system-prompt "$AGENTS_MD" \
       --skill "$SKILL"
   fi
@@ -350,11 +326,11 @@ cmd_auto() {
   export ALEPH_SESSION="$(date +%Y%m%d-%H%M%S)${slug:+-$slug}"
 
   set +e
-  "$SKILL/aleph" vault exec pi \
+  "$SIFT_TOOL" vault exec pi \
     --append-system-prompt "$AGENTS_MD" \
     --skill "$SKILL" \
     -p --mode json "$prompt" ${pi_args[@]+"${pi_args[@]}"} \
-    | SIFT_DEBUG="$debug" python3 -u "$SIFT_PACKAGE/bin/sift-log.py"
+    | SIFT_DEBUG="$debug" "$SIFT_PACKAGE/bin/sift-log"
   local rc=${PIPESTATUS[0]}
   set -e
   exit "$rc"
@@ -362,7 +338,7 @@ cmd_auto() {
 
 usage() {
   cat <<'EOF'
-sift — investigative research agent that runs entirely on your Mac.
+sift — investigate subjects in Aleph or OpenAleph from your Mac.
 
 Setup:
   sift init                              one-time: vault, creds, LLM backend
@@ -377,7 +353,7 @@ Backend management:
   sift backend local                     switch to local llama.cpp + Qwen3.6
   sift backend hosted                    switch to a hosted OpenAI-compatible endpoint
 
-Aleph tools (also available to the agent):
+Research tools (the same surface the agent uses):
   sift search query="..." [type=...] [collection=...]
   sift read   alias=r5
   sift expand alias=r5
@@ -404,9 +380,9 @@ case "${1:-}" in
   backend)
     shift; cmd_backend "$@" ;;
   search|read|expand|browse|tree|similar|hubs|sources|vault)
-    # Forward to the bundled aleph CLI. ALEPH_PROJECT_DIR is exported at
-    # the top of this script, so the vault is found regardless of cwd.
-    exec "$SKILL/aleph" "$@" ;;
+    # Forward to the bundled tool. ALEPH_PROJECT_DIR is exported at the
+    # top of this script, so the vault is found regardless of cwd.
+    exec "$SIFT_TOOL" "$@" ;;
   *)
     die "unknown command: $1 (try 'sift --help')" ;;
 esac

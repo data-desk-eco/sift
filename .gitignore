@@ -2,3 +2,5 @@
 *.swp
 .vault.sparseimage
 .vault.sparsebundle
+share/touchid
+__pycache__/

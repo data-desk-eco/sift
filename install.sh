@@ -31,6 +31,6 @@ sift installed. Next:
   sift init                       # one-time: vault, Aleph credentials, model (~12GB)
   sift auto "investigate ..."     # headless one-shot
   sift auto                       # interactive REPL
-  sift --help                     # full command list, including direct aleph tools
+  sift --help                     # full command list, including direct research tools
 
 EOF
