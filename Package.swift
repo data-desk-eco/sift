@@ -18,6 +18,9 @@ let package = Package(
     targets: [
         .target(
             name: "SiftCore",
+            dependencies: [
+                .product(name: "Markdown", package: "swift-markdown"),
+            ],
             path: "Sources/SiftCore"
         ),
         .executableTarget(
@@ -25,7 +28,6 @@ let package = Package(
             dependencies: [
                 "SiftCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "Markdown", package: "swift-markdown"),
             ],
             path: "Sources/SiftCLI",
             resources: [

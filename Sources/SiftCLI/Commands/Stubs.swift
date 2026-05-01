@@ -304,17 +304,4 @@ struct CacheClear: AsyncParsableCommand {
     }
 }
 
-// MARK: - Export (task #9)
-
-struct ExportCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "export",
-        abstract: "Render report.md → report.html with alias→Aleph entity links."
-    )
-    @Argument var src: String?
-    @Option(name: [.short, .customLong("out")]) var out: String?
-    @Option var server: String?
-    @Flag(name: .customLong("no-open")) var noOpen: Bool = false
-    @Flag var share: Bool = false
-    func run() async throws { try notImplemented("export") }
-}
+// (Export lives in Commands/Export.swift)
