@@ -249,6 +249,10 @@ public enum PiRunner {
             st.finishedAt = now
             st.lastEventAt = now
         }
+        // If this was the last running session, free the local llama
+        // model from unified memory — otherwise it keeps ~14 GB pinned
+        // and the rest of the Mac runs slowly.
+        Backend.stopLocalIfIdle()
         // The menu bar app posts a native UNUserNotification when it
         // sees the run-state file flip out of `.running`.
         return code

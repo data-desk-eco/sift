@@ -28,6 +28,14 @@ $VAULT_MOUNT/
 
 API keys live in the macOS Keychain, not on disk. `sift auto` injects `ALEPH_URL` and `ALEPH_API_KEY` into your environment automatically, so you do not need to export them yourself.
 
+## Off-limits commands
+
+The sift CLI also exposes setup, run-management, and reporting commands (`sift init`, `sift vault`, `sift backend`, `sift project`, `sift auto`, `sift lead`, `sift status`, `sift logs`, `sift attach`, `sift stop`, `sift export`). **These are for the human operator, not for you.** Never invoke them — you'll either prompt the user for Touch ID, fork another agent, or stop your own run.
+
+Likewise, never enumerate the macOS Keychain (`security dump-keychain`, `security find-generic-password -s eco.datadesk.sift`, etc.) to discover credentials — Aleph creds are already in your environment as `$ALEPH_URL` / `$ALEPH_API_KEY`. A bulk `security` call triggers a system-wide ACL prompt storm for every keychain item the user owns.
+
+If you need information about the current run (deadline, session dir, available aliases), use the agent-facing commands documented below: `sift time`, `sift recall`, `sift sql`, `sift cache stats`.
+
 ## Aliases
 
 Aleph entity IDs are 64-char hashes. The CLI assigns short aliases (`r1`, `r2`, …) to every entity that appears in any tool output, so you can refer to them in subsequent calls. Use the alias as the positional argument: `sift read r5`, `sift expand r5`, etc. The alias table is stored in `$ALEPH_SESSION_DIR/aleph.sqlite` and is shared across every session on the same vault — `r5` in one investigation resolves to the same entity in the next.
@@ -171,24 +179,13 @@ cache(key, value JSON, set_at)
 
 Useful joins: `aliases.entity_id = entities.id`; `edges.src_id`/`edges.dst_id` reference `entities.id`. `properties` is JSON — use SQLite's `json_extract(properties, '$.subject[0]')` for nested fields.
 
-### `export`
-
-Render `report.md` → `report.html`, replacing every `r\d+` alias with a hyperlink to the entity on its Aleph server. Aliases inside fenced code, inline code, or existing markdown links are left untouched.
-
-```
-sift export [SRC=report.md] [--out report.html] [--server https://aleph.example.org]
-```
-
-`report.md` stays the working file (cheap, dense, alias-shorthand for the agent); `report.html` is the human-readable artefact (full IDs, real links, ready to share). Run this once you're done writing the report.
-
-### `cache stats` / `cache clear`
+### `cache stats`
 
 ```
 sift cache stats
-sift cache clear [--older-than-days 30]
 ```
 
-`stats` reports DB size, row counts per table, and the age range of cached responses. `clear` truncates the response cache only — entities, aliases, and edges are preserved, so aliases and graph history survive across cache clears.
+Reports DB size, row counts per table, and the age range of cached responses. Useful when you want to know whether `recall` is likely to find anything before you call it.
 
 ## Recording structured findings
 

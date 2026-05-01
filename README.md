@@ -2,7 +2,7 @@
 
 A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/) — search documents, emails, and entities, follow extracted links, browse folder trees. Credentials live in the macOS Keychain (Touch ID gated); reports and the local cache live in an encrypted sparseimage at `~/.sift/.vault.sparseimage`.
 
-The same command surface is shared between humans and agents: `sift search`, `sift read`, `sift vault …` work the same whether invoked at the prompt or called by the agent under `sift auto "investigate …"`. `sift auto "PROMPT"` runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon and returns to the shell — the menu bar item shows live progress, posts a notification when done, and gives one-click access to `report.md`. Two LLM backends are supported: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves the machine except Aleph queries), or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …).
+The Aleph query commands (`sift search`, `sift read`, `sift expand`, …) are shared between humans and agents — call them yourself or let `sift auto` drive them. `sift auto "PROMPT"` runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon and returns to the shell; the menu bar app pops up automatically to show live progress, posts a notification when done, and gives one-click access to `report.md`. Two LLM backends are supported: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves the machine except Aleph queries), or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …). When the last running session ends, sift kills llama-server so it doesn't keep ~14 GB pinned in unified memory.
 
 ## Install
 
@@ -40,7 +40,7 @@ When the agent finishes you'll get a macOS notification with the session name. T
 
 `sift init` prompts for either the recommended local backend (downloads ~12 GB on first run) or a hosted OpenAI-compatible endpoint. Switch later with `sift backend local` or `sift backend hosted`. It also prompts for a one-line project description (data source and subject of investigation), which is prepended to the agent's system prompt on every run. View or change it with `sift project [show|set|edit|clear]`.
 
-By default `sift auto` continues the most recent session. Pass `--new` to start fresh; sift warns if the resumed session is more than a day old, in case you meant a different subject. `-t / --time-limit` (e.g. `30m`, `1h30m`, `90s`) sets a soft deadline; the agent paces itself by calling `sift time` between tool calls.
+By default `sift auto` continues your **active lead** — the last fresh session you started, pinned in `~/.sift/active-lead`. `sift logs`, `sift attach`, `sift stop`, and `sift status` (where the lead is marked with `*`) all default to it too, so a normal day is `sift auto "…"` once and then bare verbs after that. Switch leads with `sift lead <session>`, or `sift lead --clear` to fall back to "most recent". Pass `--new` to start a fresh session (and pin it as the new lead); sift warns if a resumed session is more than a day old. `-t / --time-limit` (e.g. `30m`, `1h30m`, `90s`) sets a soft deadline; the agent paces itself by calling `sift time` between tool calls.
 
 The agent's tools are also available directly:
 
@@ -73,6 +73,7 @@ State lives under `~/.sift/`:
 - `models/` — GGUF model files for the local backend
 - `pi/` — `models.json` and `settings.json` written by sift each run so pi talks to the configured backend (the pi *binary* itself lives separately, in `~/Library/Application Support/Sift/pi/`)
 - `run/<session>.json` — live state per detached `sift auto` run; the menu bar app watches this directory
+- `active-lead` — name of the session that bare `sift auto`/`logs`/`attach`/`stop` default to
 - `project.md` — optional one-line project description prepended to the agent's system prompt
 
 Secrets (vault passphrase, Aleph API key, hosted-backend API key) live in the **macOS Keychain** under the `eco.datadesk.sift` service.

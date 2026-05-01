@@ -60,6 +60,10 @@ struct StopCommand: AsyncParsableCommand {
                 st.status = .stopped
                 st.finishedAt = Int(Date().timeIntervalSince1970)
             }
+            // Belt-and-braces: the daemon also calls stopLocalIfIdle on
+            // exit, but a SIGTERM'd daemon may not run cleanup, so we
+            // double up here. Idempotent — no-op if already stopped.
+            Backend.stopLocalIfIdle()
         } catch {
             throw ExitCode(reportSiftError(error))
         }

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// LLM backend manager: on-disk config, pi provider config, local
@@ -213,6 +214,40 @@ public enum Backend {
         case .local:  try startLocal()
         case .hosted: return
         }
+    }
+
+    /// Kill the local llama-server (if a pidfile exists) and remove the
+    /// pidfile. Idempotent: silent no-op when the server isn't running.
+    /// llama-server holds the model in unified memory (~14 GB for the
+    /// default Qwen3.6 35B), which makes the rest of the Mac feel sluggish
+    /// when no agent is using it.
+    public static func stopLocal() {
+        let pidPath = Paths.siftHome.appending(path: "llama-server.pid")
+        defer { try? FileManager.default.removeItem(at: pidPath) }
+        guard let data = try? Data(contentsOf: pidPath),
+              let raw = String(data: data, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              let pid = pid_t(raw),
+              kill(pid, 0) == 0
+        else { return }
+        FileHandle.standardError.write(Data(
+            "[server]   stopping llama-server (pid \(pid))\n".utf8
+        ))
+        kill(pid, SIGTERM)
+        // Give it ~2s to exit cleanly, then SIGKILL if still around.
+        for _ in 0..<10 {
+            usleep(200_000)
+            if kill(pid, 0) != 0 { return }
+        }
+        kill(pid, SIGKILL)
+    }
+
+    /// Stop llama-server only when no other auto sessions are still
+    /// running. Safe to call from `sift stop` and from the daemon's
+    /// post-pi cleanup — the last one out turns off the lights.
+    public static func stopLocalIfIdle() {
+        if !RunRegistry.active().isEmpty { return }
+        stopLocal()
     }
 
     // MARK: - Setup helpers

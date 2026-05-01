@@ -117,6 +117,9 @@ final class RunStateModel {
             st.status = .stopped
             st.finishedAt = Int(Date().timeIntervalSince1970)
         }
+        // Free llama-server's ~14 GB if no other auto run still needs
+        // it — same logic as the CLI `sift stop`.
+        Backend.stopLocalIfIdle()
         reload()
     }
 
