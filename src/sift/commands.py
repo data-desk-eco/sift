@@ -170,19 +170,21 @@ def cmd_search(client: AlephClient, store: Store, args: dict) -> str:
     shown_end = offset + len(results)
     query_label = f'"{query}"' if query else "(no text query)"
     total_str = f"{total}" + ("+" if total_type == "gte" else "")
-    header = f"search {query_label} type={effective_type}  {total_str} hits, showing {shown_start}-{shown_end}"
+    header = f"search {query_label} --type {effective_type}  {total_str} hits, showing {shown_start}-{shown_end}"
     if emitter_id:
-        header += f"  emitter={args.get('emitter')}"
+        header += f"  --emitter {args.get('emitter')}"
     if recipient_id:
-        header += f"  recipient={args.get('recipient')}"
+        header += f"  --recipient {args.get('recipient')}"
     if mentions_id:
-        header += f"  mentions={args.get('mentions')}"
-    if date_from or date_to:
-        header += f"  dates={date_from or '*'}..{date_to or '*'}"
+        header += f"  --mentions {args.get('mentions')}"
+    if date_from:
+        header += f"  --date-from {date_from}"
+    if date_to:
+        header += f"  --date-to {date_to}"
     if sort_by_date:
         header += "  (sorted by date)"
     if collection:
-        header += f"  collection={collection}"
+        header += f"  --collection {collection}"
 
     if not results:
         body = "(no results)"
@@ -194,7 +196,7 @@ def cmd_search(client: AlephClient, store: Store, args: dict) -> str:
             next_offset = offset + limit
             remaining = max(0, total - (offset + len(results)))
             tail = f"{remaining}" + ("+" if total_type == "gte" else "")
-            body += f"\n[{tail} more hits — call search again with offset={next_offset}]"
+            body += f"\n[{tail} more hits — call search again with --offset {next_offset}]"
 
     return envelope(header, body, cached=cached)
 
@@ -202,7 +204,7 @@ def cmd_search(client: AlephClient, store: Store, args: dict) -> str:
 def cmd_read(client: AlephClient, store: Store, args: dict) -> str:
     alias = args.get("alias")
     if not alias:
-        raise CommandError("read requires an alias", "pass alias=r1")
+        raise CommandError("read requires an alias", "sift read r1")
     full = bool(args.get("full"))
     raw = bool(args.get("raw"))
     eid = store.resolve_alias(alias)
@@ -398,7 +400,7 @@ def cmd_hubs(client: AlephClient, store: Store, args: dict) -> str:
 def cmd_similar(client: AlephClient, store: Store, args: dict) -> str:
     alias = args.get("alias")
     if not alias:
-        raise CommandError("similar requires an alias", "pass alias=r5")
+        raise CommandError("similar requires an alias", "sift similar r5")
     limit = int(args.get("limit") or 10)
     eid = store.resolve_alias(alias)
 
@@ -449,7 +451,7 @@ def cmd_similar(client: AlephClient, store: Store, args: dict) -> str:
 def cmd_expand(client: AlephClient, store: Store, args: dict) -> str:
     alias = args.get("alias")
     if not alias:
-        raise CommandError("expand requires an alias", "pass alias=r5")
+        raise CommandError("expand requires an alias", "sift expand r5")
     per_property = int(args.get("limit") or 20)
     prop_filter = args.get("property")
     no_cache = bool(args.get("no_cache"))
@@ -476,7 +478,7 @@ def cmd_expand(client: AlephClient, store: Store, args: dict) -> str:
     if is_party and total_in_groups == 0:
         rows = [(g.get("property", "?"), g.get("count", 0)) for g in groups]
         body = ("expand on a party returns reverse-property counts only — use "
-                "`search recipient=` / `emitter=` / `mentions=` to enumerate.\n\n"
+                "`search --recipient`, `--emitter`, or `--mentions` to enumerate.\n\n"
                 + table(rows, headers=["property", "count"]))
         return envelope(f"expand {alias}", body)
 
@@ -593,7 +595,7 @@ def _count_descendants(eid: str, children_of: dict[str, list[dict]]) -> int:
 def cmd_browse(client: AlephClient, store: Store, args: dict) -> str:
     alias = args.get("alias")
     if not alias:
-        raise CommandError("browse requires an alias", "pass alias=r5")
+        raise CommandError("browse requires an alias", "sift browse r5")
     limit = int(args.get("limit") or 30)
     eid = store.resolve_alias(alias)
 
@@ -678,7 +680,7 @@ def cmd_browse(client: AlephClient, store: Store, args: dict) -> str:
         out.append(table(sibling_rows,
                          headers=["here", "alias", "schema", "name", "contents"]))
         if truncated > 0:
-            out.append(f"… {truncated} more not shown — raise limit= to see them")
+            out.append(f"… {truncated} more not shown — raise --limit to see them")
     if hit_cap:
         out.append("")
         out.append("warn: subtree larger than scan cap — descendant counts marked '+' are lower bounds")
@@ -697,8 +699,8 @@ def cmd_tree(client: AlephClient, store: Store, args: dict) -> str:
     if collection:
         return _tree_for_collection(client, store, collection, max_siblings)
     raise CommandError(
-        "tree requires alias=<entity> or collection=<id>",
-        "tree alias=r5  OR  tree collection=3843",
+        "tree requires an entity alias positional or --collection <id>",
+        "sift tree r5  OR  sift tree --collection 3843",
     )
 
 
@@ -711,7 +713,7 @@ def _tree_for_entity(client: AlephClient, store: Store, alias: str,
         raise CommandError(
             f"tree only works on folder-like entities (Folder, Package, Workbook, Directory) — "
             f"{alias} is {schema or 'unknown'}",
-            f"use browse {alias} to see siblings, or pass a folder alias",
+            f"sift browse {alias} to see siblings, or pass a folder alias",
         )
     cid = store.collection_of(eid)
     entities, total, hit_cap = _scan_subtree(
@@ -772,11 +774,11 @@ def _tree_for_collection(client: AlephClient, store: Store, collection_id: str,
         lines.append(f"{branch}{ralias:<5}  {rsch:<10}  {short(rname, 60)}")
     hidden = max(0, total - len(displayed))
     if hidden > 0:
-        lines.append(f"└── … {hidden} more roots not listed — raise max_siblings or use tree alias=…")
+        lines.append(f"└── … {hidden} more roots not listed — raise --max-siblings or use sift tree <alias>")
     if total >= 10000:
         lines.append("")
         lines.append("warn: collection has >= 10000 top-level entries (Aleph cap) — true count may be higher")
-    return envelope(f"tree collection={collection_id}", "\n".join(lines))
+    return envelope(f"tree --collection {collection_id}", "\n".join(lines))
 
 
 def _render_subtree_ascii(
@@ -823,9 +825,9 @@ def _render_subtree_ascii(
             elif is_folder and current_depth + 1 == depth:
                 if children_of.get(kid):
                     next_prefix = prefix + ("    " if last else "│   ")
-                    lines.append(f"{next_prefix}└── … (depth limit; raise depth to see)")
+                    lines.append(f"{next_prefix}└── … (depth limit; raise --depth to see)")
         if trunc > 0:
-            lines.append(f"{prefix}└── … {trunc} more entries not shown — raise max_siblings")
+            lines.append(f"{prefix}└── … {trunc} more entries not shown — raise --max-siblings")
 
     walk(root_id, "", 1)
     if hit_cap:
@@ -854,12 +856,12 @@ def cmd_neighbors(store: Store, args: dict) -> str:
     No round-trip — pure local lookup against the edges table."""
     alias = args.get("alias")
     if not alias:
-        raise CommandError("neighbors requires an alias", "pass alias=r5")
+        raise CommandError("neighbors requires an alias", "sift neighbors r5")
     direction = (args.get("direction") or "both").lower()
     if direction not in ("out", "in", "both"):
         raise CommandError(
             f"unknown direction '{direction}'",
-            "use direction=out, direction=in, or direction=both",
+            "--direction out|in|both",
         )
     prop_filter = args.get("property")
     limit = max(1, int(args.get("limit") or 50))
@@ -895,7 +897,7 @@ def cmd_neighbors(store: Store, args: dict) -> str:
         render_block(f"out edges ({len(rows)})", rows,
                      ["property", "alias", "schema", "name"])
         if truncated:
-            out.append(f"… {truncated} edges hidden (raise limit=)")
+            out.append(f"… {truncated} edges hidden (raise --limit)")
 
     if direction in ("in", "both"):
         sql = ("SELECT prop, src_id FROM edges WHERE dst_id=?"
@@ -916,7 +918,7 @@ def cmd_neighbors(store: Store, args: dict) -> str:
         render_block(f"in edges ({len(rows)})", rows,
                      ["property", "alias", "schema", "name"])
         if truncated:
-            out.append(f"… {truncated} edges hidden (raise limit=)")
+            out.append(f"… {truncated} edges hidden (raise --limit)")
 
     if len(out) == 1:
         out.append("")
@@ -925,9 +927,9 @@ def cmd_neighbors(store: Store, args: dict) -> str:
 
     header = f"neighbors {alias}"
     if prop_filter:
-        header += f" property={prop_filter}"
+        header += f" --property {prop_filter}"
     if direction != "both":
-        header += f" direction={direction}"
+        header += f" --direction {direction}"
     return envelope(header, "\n".join(out))
 
 
@@ -961,9 +963,9 @@ def cmd_recall(store: Store, args: dict) -> str:
     out: list[str] = []
     scope = []
     if collection:
-        scope.append(f"collection={collection}")
+        scope.append(f"--collection {collection}")
     if schema_filter:
-        scope.append(f"schema={schema_filter}")
+        scope.append(f"--schema {schema_filter}")
     scope_label = "  ".join(scope) if scope else "all"
     out.append(f"{total} entities ({full_bodies} with full body), "
                f"{edge_count} cached edges  [{scope_label}]")
@@ -1076,7 +1078,7 @@ def cmd_cache_clear(store: Store, args: dict) -> str:
             days = int(older_than_days)
         except (TypeError, ValueError) as exc:
             raise CommandError(
-                f"older_than_days must be an integer, got {older_than_days!r}"
+                f"--older-than-days must be an integer, got {older_than_days!r}"
             ) from exc
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
@@ -1108,7 +1110,7 @@ def cmd_sql(store: Store, args: dict) -> str:
     if not query:
         raise CommandError(
             "sql requires a query",
-            'pass query="select alias, n from aliases order by n desc limit 5"',
+            'sift sql "select alias, n from aliases order by n desc limit 5"',
         )
     query = query.strip()
 

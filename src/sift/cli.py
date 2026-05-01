@@ -4,11 +4,13 @@
   sift backend …             show/switch backend
   sift project …             show/edit project context
   sift vault …               vault management
-  sift {search,read,…}       Aleph research tools (pass-through to data plane)
+  sift {search,read,…}       Aleph research tools
 
-The research tools accept the existing `key=value` style for backwards
-compat with SKILL.md and the agent's call sites. Everything else uses
-proper Click options."""
+Research and cache tools use standard POSIX `--flag value` syntax (with
+`-l`/`-f`/`-r`/`-o` shorthands) and a single positional for the obvious
+argument (query / alias). This lets the agent reach for the same muscle
+memory it has for any other UNIX command instead of memorising bespoke
+syntax."""
 
 from __future__ import annotations
 
@@ -44,29 +46,6 @@ from .vault import Vault
 
 SIFT_HOME = Path.home() / ".sift"
 DATA_DIR = files("sift") / "data"
-
-BOOL_KEYS = {"full", "raw", "no_cache"}
-
-# Single-dash shortcuts the agent reaches for instinctively. Mapped to the
-# canonical key=value name documented in SKILL.md.
-SHORT_FLAG_ALIASES = {
-    "f": "full",
-    "r": "raw",
-    "l": "limit",
-    "q": "query",
-    "o": "offset",
-}
-
-# Every kwarg any research/cache command accepts. Used to reject `--typo` and
-# `-x` flags up front instead of silently routing them into `query`/`alias`,
-# which produces baffling 404s like `sift read -f r5` did before.
-KNOWN_KEYS = {
-    "query", "type", "limit", "offset", "collection", "sort", "no_cache",
-    "emitter", "recipient", "mentions", "date_from", "date_to",
-    "alias", "full", "raw",
-    "grep", "schema", "property", "direction", "depth", "max_siblings",
-    "older_than_days",
-}
 
 
 def make_vault() -> Vault:
@@ -108,63 +87,6 @@ def session_db_path() -> Path:
         mp = vault.find_mount()
         base = str(mp / "research") if mp else str(SIFT_HOME)
     return Path(base).expanduser() / "aleph.sqlite"
-
-
-def parse_kv_args(raw: list[str]) -> dict:
-    """Accept `key=value`, `--key=value`, `--key value`, and a small set of
-    short flags (`-f`, `-l N`, `-q Q`, …). Unknown flags raise so typos
-    surface immediately instead of being smuggled into positional args."""
-    out: dict[str, Any] = {}
-    i = 0
-    while i < len(raw):
-        token = raw[i]
-        if token.startswith("--"):
-            body = token[2:].replace("-", "_")
-            if "=" in body:
-                k, v = body.split("=", 1)
-            elif body in BOOL_KEYS:
-                k, v = body, "true"
-            elif i + 1 < len(raw) and not raw[i + 1].startswith("-"):
-                k, v = body, raw[i + 1]
-                i += 1
-            else:
-                k, v = body, "true"
-            if k not in KNOWN_KEYS:
-                raise CommandError(
-                    f"unknown flag '--{k}'",
-                    "use key=value syntax; see SKILL.md for accepted args",
-                )
-            out[k] = v
-        elif (token.startswith("-") and len(token) > 1
-              and not token[1].isdigit() and "=" not in token):
-            short = token[1:]
-            if short not in SHORT_FLAG_ALIASES:
-                raise CommandError(
-                    f"unknown flag '-{short}'",
-                    "use key=value syntax; see SKILL.md for accepted args",
-                )
-            k = SHORT_FLAG_ALIASES[short]
-            if k in BOOL_KEYS:
-                v = "true"
-            elif i + 1 < len(raw) and not raw[i + 1].startswith("-"):
-                v = raw[i + 1]
-                i += 1
-            else:
-                raise CommandError(
-                    f"-{short} ({k}) requires a value",
-                    f"e.g. -{short} 10 or {k}=10",
-                )
-            out[k] = v
-        elif "=" in token:
-            k, v = token.split("=", 1)
-            out[k] = v
-        else:
-            out.setdefault("_positional", []).append(token)
-        i += 1
-    for k in list(out.keys()):
-        if k in BOOL_KEYS:
-            out[k] = str(out[k]).lower() in ("1", "true", "yes", "y")
-    return out
 
 
 def ensure_initialized() -> None:
@@ -692,86 +614,161 @@ def vault_env_cmd() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Research tools — pass-through key=value parsing, kept for SKILL.md compat
+# Research tools — Click subcommands with POSIX flags + a single positional.
+# The cmd_* functions in commands.py still consume an `args` dict, so each
+# wrapper just packs its parsed Click params into one.
 # ---------------------------------------------------------------------------
 
-TOOLS = {
-    "search": cmd_search,
-    "read": cmd_read,
-    "sources": cmd_sources,
-    "hubs": cmd_hubs,
-    "similar": cmd_similar,
-    "expand": cmd_expand,
-    "browse": cmd_browse,
-    "tree": cmd_tree,
-}
 
-# Local-only commands operate purely against the cache DB — no Aleph
-# round-trip, no client construction, no vault unlock required.
-LOCAL_TOOLS = {
-    "neighbors": cmd_neighbors,
-    "recall": cmd_recall,
-    "sql": cmd_sql,
-}
+def _run_research(fn, args: dict) -> None:
+    store = Store(session_db_path())
+    client = make_client()
+    click.echo(fn(client, store, args))
 
 
-def _make_research_command(name: str):
-    @click.pass_context
-    def _cmd(ctx: click.Context) -> None:
-        args = parse_kv_args(ctx.args)
-        pos = args.pop("_positional", None)
-        if pos and "query" not in args and name in ("search", "hubs"):
-            args["query"] = " ".join(pos)
-        elif pos and "alias" not in args and name in (
-            "read", "browse", "expand", "similar", "tree",
-        ):
-            args["alias"] = pos[0]
-        elif pos and "grep" not in args and name == "sources":
-            args["grep"] = " ".join(pos)
-
-        store = Store(session_db_path())
-        client = make_client()
-        out = TOOLS[name](client, store, args)
-        click.echo(out)
-
-    _cmd.__name__ = name
-    return _cmd
+def _run_local(fn, args: dict) -> None:
+    store = Store(session_db_path())
+    click.echo(fn(store, args))
 
 
-def _make_local_command(name: str):
-    @click.pass_context
-    def _cmd(ctx: click.Context) -> None:
-        args = parse_kv_args(ctx.args)
-        pos = args.pop("_positional", None)
-        if pos and "alias" not in args and name == "neighbors":
-            args["alias"] = pos[0]
-        elif pos and "query" not in args and name == "sql":
-            args["query"] = " ".join(pos)
+@cli.command("search")
+@click.argument("query", nargs=-1)
+@click.option("--type", "type_", default=None,
+              help="emails|docs|web|people|orgs|any (default: any)")
+@click.option("-l", "--limit", type=int, default=None)
+@click.option("-o", "--offset", type=int, default=None)
+@click.option("--collection", default=None, help="restrict to one collection id")
+@click.option("--sort", default=None, help="set to 'date' for chronological order")
+@click.option("--no-cache", is_flag=True, default=False,
+              help="bypass the local response cache")
+@click.option("--emitter", default=None, help="alias of a Person/Organization sender")
+@click.option("--recipient", default=None, help="alias of a Person/Organization recipient")
+@click.option("--mentions", default=None, help="alias of a party Aleph linked to the doc")
+@click.option("--date-from", default=None, help="YYYY-MM-DD")
+@click.option("--date-to", default=None, help="YYYY-MM-DD")
+def search_cmd(query, type_, limit, offset, collection, sort, no_cache,
+               emitter, recipient, mentions, date_from, date_to) -> None:
+    """Search the collection for hits."""
+    _run_research(cmd_search, {
+        "query": " ".join(query),
+        "type": type_, "limit": limit, "offset": offset,
+        "collection": collection, "sort": sort, "no_cache": no_cache,
+        "emitter": emitter, "recipient": recipient, "mentions": mentions,
+        "date_from": date_from, "date_to": date_to,
+    })
 
-        store = Store(session_db_path())
-        out = LOCAL_TOOLS[name](store, args)
-        click.echo(out)
 
-    _cmd.__name__ = name
-    return _cmd
-
-
-for _name in TOOLS:
-    cli.command(
-        _name,
-        context_settings={"ignore_unknown_options": True,
-                          "allow_extra_args": True},
-        help=f"Aleph: {_name} (key=value args; see SKILL.md)",
-    )(_make_research_command(_name))
+@cli.command("read")
+@click.argument("alias")
+@click.option("-f", "--full", is_flag=True, default=False,
+              help="don't truncate body text")
+@click.option("-r", "--raw", is_flag=True, default=False,
+              help="dump the full FtM JSON blob")
+def read_cmd(alias, full, raw) -> None:
+    """Pull the full content of an entity by alias."""
+    _run_research(cmd_read, {"alias": alias, "full": full, "raw": raw})
 
 
-for _name in LOCAL_TOOLS:
-    cli.command(
-        _name,
-        context_settings={"ignore_unknown_options": True,
-                          "allow_extra_args": True},
-        help=f"Cache: {_name} (key=value args; see SKILL.md)",
-    )(_make_local_command(_name))
+@cli.command("sources")
+@click.argument("grep", nargs=-1)
+@click.option("-l", "--limit", type=int, default=None)
+def sources_cmd(grep, limit) -> None:
+    """List Aleph collections visible to your API key."""
+    _run_research(cmd_sources, {
+        "grep": " ".join(grep) or None,
+        "limit": limit,
+    })
+
+
+@cli.command("hubs")
+@click.argument("query", nargs=-1)
+@click.option("--collection", default=None)
+@click.option("--schema", default=None, help="schema to facet over (default: Email)")
+@click.option("-l", "--limit", type=int, default=None)
+def hubs_cmd(query, collection, schema, limit) -> None:
+    """Top emitters / recipients / mentions for entities matching a query."""
+    _run_research(cmd_hubs, {
+        "query": " ".join(query),
+        "collection": collection,
+        "schema": schema,
+        "limit": limit,
+    })
+
+
+@cli.command("similar")
+@click.argument("alias")
+@click.option("-l", "--limit", type=int, default=None)
+def similar_cmd(alias, limit) -> None:
+    """Aleph-extracted name-variant candidates for a party entity."""
+    _run_research(cmd_similar, {"alias": alias, "limit": limit})
+
+
+@cli.command("expand")
+@click.argument("alias")
+@click.option("--property", "property_", default=None,
+              help="narrow to one relation (e.g. mentions, parent)")
+@click.option("-l", "--limit", type=int, default=None)
+@click.option("--no-cache", is_flag=True, default=False)
+def expand_cmd(alias, property_, limit, no_cache) -> None:
+    """Show entities linked via FtM property refs, grouped by property."""
+    _run_research(cmd_expand, {
+        "alias": alias, "property": property_,
+        "limit": limit, "no_cache": no_cache,
+    })
+
+
+@cli.command("browse")
+@click.argument("alias")
+@click.option("-l", "--limit", type=int, default=None)
+def browse_cmd(alias, limit) -> None:
+    """Filesystem-style: parent folder and siblings of an entity."""
+    _run_research(cmd_browse, {"alias": alias, "limit": limit})
+
+
+@cli.command("tree")
+@click.argument("alias", required=False)
+@click.option("--collection", default=None,
+              help="render the collection's roots instead of an entity's subtree")
+@click.option("--depth", type=int, default=None)
+@click.option("--max-siblings", type=int, default=None)
+def tree_cmd(alias, collection, depth, max_siblings) -> None:
+    """Render an ASCII subtree of a folder, or a collection's top-level roots."""
+    _run_research(cmd_tree, {
+        "alias": alias, "collection": collection,
+        "depth": depth, "max_siblings": max_siblings,
+    })
+
+
+@cli.command("neighbors")
+@click.argument("alias")
+@click.option("--direction", default=None, help="out|in|both (default: both)")
+@click.option("--property", "property_", default=None,
+              help="narrow to one FtM property")
+@click.option("-l", "--limit", type=int, default=None)
+def neighbors_cmd(alias, direction, property_, limit) -> None:
+    """Show every cached edge touching an entity (local cache only)."""
+    _run_local(cmd_neighbors, {
+        "alias": alias, "direction": direction,
+        "property": property_, "limit": limit,
+    })
+
+
+@cli.command("recall")
+@click.option("--collection", default=None)
+@click.option("--schema", default=None)
+@click.option("-l", "--limit", type=int, default=None)
+def recall_cmd(collection, schema, limit) -> None:
+    """Summarise what's in the local cache for this vault."""
+    _run_local(cmd_recall, {
+        "collection": collection, "schema": schema, "limit": limit,
+    })
+
+
+@cli.command("sql")
+@click.argument("query")
+def sql_cmd(query) -> None:
+    """Read-only SQL against the cache DB (mode=ro)."""
+    _run_local(cmd_sql, {"query": query})
 
 
 # ---------------------------------------------------------------------------
@@ -794,14 +791,13 @@ def cache_stats_cmd() -> None:
     click.echo(cmd_cache_stats(store, {}))
 
 
-@cache_group.command("clear", context_settings={"ignore_unknown_options": True,
-                                                 "allow_extra_args": True})
-@click.pass_context
-def cache_clear_cmd(ctx: click.Context) -> None:
+@cache_group.command("clear")
+@click.option("--older-than-days", type=int, default=None,
+              help="only delete cache entries older than N days")
+def cache_clear_cmd(older_than_days: int | None) -> None:
     """Truncate the response cache (entities/aliases/edges preserved)."""
-    args = parse_kv_args(ctx.args)
     store = Store(session_db_path())
-    click.echo(cmd_cache_clear(store, args))
+    click.echo(cmd_cache_clear(store, {"older_than_days": older_than_days}))
 
 
 # ---------------------------------------------------------------------------
