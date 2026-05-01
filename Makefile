@@ -6,6 +6,7 @@ PREFIX ?= $(HOME)/.local
 BINDIR := $(PREFIX)/bin
 APPDIR ?= /Applications
 APP_NAME := Sift
+APP_PRODUCT := sift-menubar  # SPM product name (lowercased to dodge case-insensitive FS clash with `sift`)
 BUNDLE_ID := eco.datadesk.sift.menubar
 BUILD_CONFIG ?= release
 
@@ -27,13 +28,13 @@ bundle: cli-menubar
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	@mkdir -p $(APP_BUNDLE)/Contents/Resources
-	@cp $(BUILD_DIR)/$(APP_NAME) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
+	@cp $(BUILD_DIR)/$(APP_PRODUCT) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	@printf '%s\n' "$$INFO_PLIST" > $(APP_BUNDLE)/Contents/Info.plist
 	@printf '%s' "APPL????" > $(APP_BUNDLE)/Contents/PkgInfo
 	@echo "bundled  -> $(APP_BUNDLE)"
 
 cli-menubar:
-	swift build -c $(BUILD_CONFIG) --product $(APP_NAME)
+	swift build -c $(BUILD_CONFIG) --product $(APP_PRODUCT)
 
 codesign: bundle
 	@codesign --force --deep --sign - \

@@ -7,7 +7,7 @@ let package = Package(
     products: [
         .library(name: "SiftCore", targets: ["SiftCore"]),
         .executable(name: "sift", targets: ["SiftCLI"]),
-        .executable(name: "Sift", targets: ["SiftMenuBar"]),
+        .executable(name: "sift-menubar", targets: ["SiftMenuBar"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git",
@@ -31,13 +31,20 @@ let package = Package(
             ],
             path: "Sources/SiftCLI",
             resources: [
-                .process("Resources"),
+                // .copy preserves the `sift/SKILL.md` subdirectory layout
+                // pi requires (the --skill dir name must match the skill name).
+                .copy("Resources"),
             ]
         ),
         .executableTarget(
             name: "SiftMenuBar",
             dependencies: ["SiftCore"],
             path: "Sources/SiftMenuBar"
+        ),
+        .testTarget(
+            name: "SiftCoreTests",
+            dependencies: ["SiftCore"],
+            path: "Tests/SiftCoreTests"
         ),
     ]
 )

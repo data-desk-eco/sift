@@ -35,6 +35,16 @@ public func runSQL(store: Store, input: SQLInput) throws -> String {
 
     let columnCount = sqlite3_column_count(stmt)
     if columnCount == 0 {
+        // Write-side statement (DELETE / UPDATE / INSERT). Step it once
+        // so SQLite reports SQLITE_READONLY rather than silently no-oping.
+        let rc = sqlite3_step(stmt)
+        if rc != SQLITE_DONE {
+            let msg = String(cString: sqlite3_errmsg(ro))
+            throw SiftError(
+                "sqlite error: \(msg)",
+                suggestion: "the cache DB is opened read-only; DML and DDL aren't allowed"
+            )
+        }
         return Render.envelope("sql", "(query produced no result set)")
     }
     var headers: [String] = []

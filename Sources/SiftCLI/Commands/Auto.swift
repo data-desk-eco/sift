@@ -36,9 +36,8 @@ struct AutoCommand: AsyncParsableCommand {
     }
 
     private func execute() async throws {
-        try Sift.ensureInitialized()
-        SystemPrompt.resourceFinder = { siftCLIResources() }
-
+        // Parse the deadline first so a bad value fails fast, before
+        // any vault unlock or backend startup happens.
         let deadline: Deadline?
         if let raw = timeLimit {
             let seconds = try Deadline.parseDuration(raw)
@@ -46,6 +45,9 @@ struct AutoCommand: AsyncParsableCommand {
         } else {
             deadline = nil
         }
+
+        try Sift.ensureInitialized()
+        SystemPrompt.resourceFinder = { siftCLIResources() }
 
         let promptText = prompt.joined(separator: " ")
 
@@ -202,22 +204,29 @@ struct AutoCommand: AsyncParsableCommand {
 // MARK: - Bundled-resource lookup
 
 func siftCLIResources() -> SystemPrompt.ResourceURLs {
+    // `.copy("Resources")` lands the markdown under
+    // <bundle>/Resources/{AGENTS.md, sift/SKILL.md}. The leading
+    // "Resources" subdirectory comes from the source-tree layout we
+    // told SPM to copy verbatim.
     SystemPrompt.ResourceURLs(
-        agentsMD: Bundle.module.url(forResource: "AGENTS", withExtension: "md"),
+        agentsMD: Bundle.module.url(
+            forResource: "AGENTS", withExtension: "md", subdirectory: "Resources"
+        ),
         skillMD: Bundle.module.url(
-            forResource: "SKILL", withExtension: "md", subdirectory: "sift"
+            forResource: "SKILL", withExtension: "md", subdirectory: "Resources/sift"
         )
     )
 }
 
 func skillDir() -> URL {
     // pi requires the --skill directory's name to match the skill name
-    // (i.e. `sift`) and to contain only SKILL.md. Bundle.module gives us
-    // the resources dir; the SKILL.md sits in the `sift` subdir under it.
+    // (i.e. `sift`) and to contain only SKILL.md.
     let bundle = Bundle.module
-    if let url = bundle.url(forResource: "sift", withExtension: nil) {
+    if let url = bundle.url(
+        forResource: "sift", withExtension: nil, subdirectory: "Resources"
+    ) {
         return url
     }
-    // Fallback (shouldn't hit in production builds): the resource dir root.
-    return bundle.bundleURL.appending(path: "sift")
+    // Fallback (shouldn't hit in production builds): synthesise it.
+    return bundle.bundleURL.appending(path: "Resources/sift")
 }
