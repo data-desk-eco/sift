@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# sift installer — bootstraps Homebrew (for runtime deps) and uv, then
-# installs sift itself with `uv tool install`.
+# sift installer — clones the repo, builds the Swift binary + menu bar
+# app, and drops them in ~/.local/bin and /Applications.
 # Run via:  curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
 
 set -euo pipefail
 
-# Quieter Homebrew: skip the auto-update banner that runs on every
-# install, and silence the post-install env-hint nag. Real failures
-# still print on stderr.
+# Quiet Homebrew chatter; real failures still print on stderr.
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_ENV_HINTS=1
 
@@ -20,16 +18,25 @@ if [[ "$(uname -m)" != "arm64" ]]; then
   exit 1
 fi
 
+# We need Xcode Command Line Tools for swiftc. xcode-select returns a
+# valid path if anything's installed; trigger the GUI installer otherwise.
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "Xcode Command Line Tools not found — triggering the installer."
+  xcode-select --install || true
+  echo "Re-run this installer once the dialog finishes."
+  exit 1
+fi
+
 if ! command -v brew >/dev/null 2>&1; then
   echo "Homebrew not found — installing it first."
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-# Runtime deps. uv ships sift; pi is the agent harness; llama.cpp serves
-# the local model; node is needed for the npm-installed pi.
+# Runtime deps: pi is the agent harness; llama.cpp serves the local
+# model; node hosts pi.
 missing=()
-for formula in uv node llama.cpp; do
+for formula in node llama.cpp; do
   brew list --formula "$formula" >/dev/null 2>&1 || missing+=("$formula")
 done
 if (( ${#missing[@]} > 0 )); then
@@ -42,25 +49,37 @@ if ! command -v pi >/dev/null 2>&1; then
   npm install -g --loglevel=error @mariozechner/pi
 fi
 
-# If a previous (pre-0.2) Homebrew-installed sift is on PATH, get rid of
-# it so the uv-installed binary wins.
-if brew list --formula 2>/dev/null | grep -qx sift; then
-  echo "Removing legacy Homebrew sift install..."
-  brew uninstall sift >/dev/null
+# Where to keep the source tree. Use a stable path so re-runs do an
+# update rather than re-clone, and so the user can `cd` in to inspect.
+SIFT_SRC="${SIFT_SRC:-$HOME/Library/Application Support/Sift/src}"
+mkdir -p "$(dirname "$SIFT_SRC")"
+
+if [[ -d "$SIFT_SRC/.git" ]]; then
+  echo "Updating sift sources at $SIFT_SRC..."
+  git -C "$SIFT_SRC" fetch --quiet origin
+  git -C "$SIFT_SRC" reset --quiet --hard origin/main
+else
+  echo "Cloning sift sources to $SIFT_SRC..."
+  git clone --quiet https://github.com/data-desk-eco/sift "$SIFT_SRC"
 fi
 
-echo "Installing sift..."
-uv tool install --force --quiet git+https://github.com/data-desk-eco/sift
+echo "Building sift (this takes a minute on first run)..."
+make -C "$SIFT_SRC" --quiet install
 
 cat <<'EOF'
 
-sift installed. Make sure ~/.local/bin is on your PATH (uv tool's default).
+sift installed. Make sure ~/.local/bin is on your PATH.
 
 Next:
 
   sift init                       # one-time: vault, Aleph credentials, model (~12GB)
-  sift auto "investigate ..."     # headless one-shot
+  sift auto "investigate ..."     # headless one-shot, returns to shell
+  sift status                     # check what's running
   sift auto                       # interactive REPL
   sift --help                     # full command list
+
+The menu bar item (Sift.app) is in /Applications. Open it once to see
+live progress; Shortcuts.app picks up the "Investigate Subject" action
+the same way.
 
 EOF
