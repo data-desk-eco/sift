@@ -2,6 +2,10 @@
 *.swp
 .vault.sparseimage
 .vault.sparsebundle
+.build/
+.swiftpm/
+DerivedData/
+Sift.app/
 __pycache__/
 *.egg-info/
 dist/
