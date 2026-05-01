@@ -14,6 +14,7 @@ syntax."""
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import shlex
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import requests
 
 from . import backend as _backend
 from .client import AlephClient
@@ -197,10 +199,20 @@ def _require_dep(name: str, hint: str) -> None:
 @click.option("--debug", is_flag=True, help="dump pi's raw JSON event stream")
 @click.option("--time-limit", "-t", "time_limit", default=None,
               help="soft deadline (e.g. 30m, 1h30m, 90s); the agent self-paces against it")
+@click.option("--new", "-n", "new", is_flag=True, default=False,
+              help="start a fresh session instead of continuing the most "
+                   "recent one. Required when switching to a different "
+                   "subject of investigation.")
 @click.pass_context
 def auto(ctx: click.Context, prompt: str | None, debug: bool,
-         time_limit: str | None) -> None:
-    """Run the agent. With PROMPT, headless one-shot; without, interactive REPL."""
+         time_limit: str | None, new: bool) -> None:
+    """Run the agent. By default continues the most recent session — pi reloads
+    its conversation history and the agent's cwd is the original session dir,
+    so findings.db and report.md keep growing in place.
+
+    Pass --new to start fresh (e.g. when changing subject of investigation).
+    With PROMPT, runs headless one-shot; without, drops into an interactive
+    REPL."""
     # Parse duration first so a bad value fails before we spin up the backend.
     deadline = _set_deadline(time_limit) if time_limit else None
 
@@ -224,31 +236,61 @@ def auto(ctx: click.Context, prompt: str | None, debug: bool,
     vault = make_vault()
     mp = vault.find_mount() or vault.unlock()
     env.update(vault.env_dict(mp))
-    if not prompt:
-        env.setdefault("ALEPH_SESSION", "default")
-        session_dir = mp / "research" / env["ALEPH_SESSION"]
-        session_dir.mkdir(parents=True, exist_ok=True)
-        env["SIFT_FINDINGS_DB"] = str(session_dir / "findings.db")
-        os.chdir(session_dir)
-        # Interactive REPL — replace this process with pi.
-        os.execvpe("pi", [
-            "pi",
-            "--system-prompt", str(sysprompt_path),
-            "--skill", str(skill_path),
-        ], env)
-        return  # not reached
 
-    env["ALEPH_SESSION"] = _session_name(prompt)
-    session_dir = mp / "research" / env["ALEPH_SESSION"]
+    last = None if new else _last_session(mp)
+    if last is not None:
+        session_dir = last
+        age_h = (_time.time() - last.stat().st_mtime) / 3600
+        if age_h >= STALE_SESSION_HOURS:
+            click.echo(
+                f"[auto]     resuming {session_dir.name} "
+                f"({_fmt_age(age_h)} since last activity — pass --new if "
+                f"this is a different investigation)",
+                err=True,
+            )
+        else:
+            click.echo(f"[auto]     resuming {session_dir.name}", err=True)
+    elif prompt:
+        session_dir = mp / "research" / _new_session_name(prompt)
+        click.echo(f"[auto]     session: {session_dir.name}", err=True)
+    else:
+        name = env.get("ALEPH_SESSION", "default")
+        session_dir = mp / "research" / name
+        click.echo(f"[auto]     session: {session_dir.name}", err=True)
+
     session_dir.mkdir(parents=True, exist_ok=True)
+    env["ALEPH_SESSION"] = session_dir.name
     env["SIFT_FINDINGS_DB"] = str(session_dir / "findings.db")
     os.chdir(session_dir)
 
+    pi_session_dir = session_dir / ".pi-sessions"
+    has_history = pi_session_dir.exists() and any(pi_session_dir.iterdir())
+    pi_session_dir.mkdir(parents=True, exist_ok=True)
+
+    pi_args = [
+        "pi",
+        "--system-prompt", str(sysprompt_path),
+        "--skill", str(skill_path),
+        "--session-dir", str(pi_session_dir),
+    ]
+    resuming = last is not None
+    if resuming:
+        if has_history:
+            pi_args.append("--continue")
+        else:
+            click.echo(
+                "[auto]     no prior pi history in this session — starting "
+                "cold. report.md and findings.db are still available.",
+                err=True,
+            )
+
+    if not prompt:
+        # Interactive REPL — replace this process with pi.
+        os.execvpe("pi", pi_args, env)
+        return  # not reached
+
     proc = subprocess.Popen(
-        ["pi",
-         "--system-prompt", str(sysprompt_path),
-         "--skill", str(skill_path),
-         "-p", "--mode", "json", prompt, *pi_extra],
+        pi_args + ["-p", "--mode", "json", prompt, *pi_extra],
         stdout=subprocess.PIPE, stderr=sys.stderr,
         env=env, text=True,
     )
@@ -258,13 +300,92 @@ def auto(ctx: click.Context, prompt: str | None, debug: bool,
     sys.exit(proc.wait())
 
 
-def _session_name(prompt: str) -> str:
-    import datetime
-    import re
-    slug = re.sub(r"-+", "-",
-                  re.sub(r"[^a-z0-9]", "-", prompt.lower())).strip("-")[:40]
+def _new_session_name(prompt: str) -> str:
+    """Build `<timestamp>-<slug>` for a fresh session. Tries the configured
+    backend for a clean 2-5 word slug; falls back to a regex slug of the
+    prompt if the model call fails."""
+    slug = _ai_slug(prompt) or _regex_slug(prompt)
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     return f"{ts}-{slug}" if slug else ts
+
+
+def _regex_slug(prompt: str) -> str:
+    return re.sub(r"-+", "-",
+                  re.sub(r"[^a-z0-9]", "-", prompt.lower())).strip("-")[:40]
+
+
+def _sanitize_slug(text: str) -> str:
+    """Take whatever the model spat out and beat it into a kebab-case slug."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    candidate = lines[-1].strip().strip("`'\"").strip()
+    slug = re.sub(r"[^a-z0-9-]+", "-", candidate.lower())
+    return re.sub(r"-+", "-", slug).strip("-")[:50]
+
+
+def _ai_slug(prompt: str, timeout: float = 8.0) -> str | None:
+    """Ask the configured backend for a kebab-case session slug. Returns
+    None on any error so the caller can fall back to a regex slug."""
+    config = _backend.read_config()
+    if not config:
+        return None
+    if config["kind"] == "local":
+        port = config.get("port", _backend.DEFAULT_LOCAL_PORT)
+        base_url = f"http://127.0.0.1:{port}/v1"
+        api_key = "sift-local"
+    else:
+        base_url = config["base_url"]
+        api_key = config.get("api_key", "")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    body = {
+        "model": config["model_name"],
+        "messages": [
+            {"role": "system",
+             "content": ("You name research sessions with a short slug. "
+                         "Output only the slug — 2 to 5 lowercase words "
+                         "separated by hyphens, no punctuation, no quotes, "
+                         "no commentary, no preface. Focus on the subject "
+                         "of the investigation, not generic verbs.")},
+            {"role": "user", "content": f"Investigation: {prompt}"},
+        ],
+        "max_tokens": 32,
+        "temperature": 0.2,
+    }
+    try:
+        resp = requests.post(f"{base_url.rstrip('/')}/chat/completions",
+                             headers=headers, json=body, timeout=timeout)
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"] or ""
+    except (requests.RequestException, KeyError, ValueError):
+        return None
+    return _sanitize_slug(text) or None
+
+
+STALE_SESSION_HOURS = 24
+
+
+def _last_session(mp: Path) -> Path | None:
+    """Most recently modified session dir under `<vault>/research/`, or None
+    if none exists. Skips the bare `default` REPL session so it doesn't
+    silently absorb a `sift auto "PROMPT"` call from a different subject."""
+    research = mp / "research"
+    if not research.exists():
+        return None
+    candidates = sorted(
+        (p for p in research.iterdir() if p.is_dir() and p.name != "default"),
+        key=lambda p: p.stat().st_mtime, reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def _fmt_age(hours: float) -> str:
+    if hours < 48:
+        return f"{int(hours)}h"
+    return f"{int(hours / 24)}d"
 
 
 def _strip_frontmatter(text: str) -> str:
