@@ -63,7 +63,7 @@ struct StopCommand: AsyncParsableCommand {
     func run() async throws { try notImplemented("stop") }
 }
 
-// MARK: - Research tools (task #6)
+// MARK: - Research tools
 
 struct SearchCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -82,7 +82,26 @@ struct SearchCommand: AsyncParsableCommand {
     @Option(name: .customLong("date-from")) var dateFrom: String?
     @Option(name: .customLong("date-to")) var dateTo: String?
 
-    func run() async throws { try notImplemented("search") }
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = SearchInput(
+                query: query.joined(separator: " "),
+                type: type ?? "any",
+                limit: limit ?? 10,
+                offset: offset ?? 0,
+                collection: collection,
+                sortByDate: sort == "date",
+                noCache: noCache,
+                emitter: emitter, recipient: recipient, mentions: mentions,
+                dateFrom: dateFrom, dateTo: dateTo
+            )
+            emit(try await runSearch(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct ReadCommand: AsyncParsableCommand {
@@ -92,7 +111,17 @@ struct ReadCommand: AsyncParsableCommand {
     @Argument var alias: String
     @Flag(name: [.short, .customLong("full")]) var full: Bool = false
     @Flag(name: [.short, .customLong("raw")]) var raw: Bool = false
-    func run() async throws { try notImplemented("read") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = ReadInput(alias: alias, full: full, raw: raw)
+            emit(try await runRead(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct SourcesCommand: AsyncParsableCommand {
@@ -101,7 +130,18 @@ struct SourcesCommand: AsyncParsableCommand {
     )
     @Argument var grep: [String] = []
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
-    func run() async throws { try notImplemented("sources") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let g = grep.joined(separator: " ")
+            let input = SourcesInput(grep: g.isEmpty ? nil : g, limit: limit ?? 50)
+            emit(try await runSources(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct HubsCommand: AsyncParsableCommand {
@@ -113,7 +153,21 @@ struct HubsCommand: AsyncParsableCommand {
     @Option var collection: String?
     @Option var schema: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
-    func run() async throws { try notImplemented("hubs") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = HubsInput(
+                query: query.joined(separator: " "),
+                collection: collection, schema: schema ?? "Email",
+                limit: limit ?? 10
+            )
+            emit(try await runHubs(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct SimilarCommand: AsyncParsableCommand {
@@ -123,7 +177,17 @@ struct SimilarCommand: AsyncParsableCommand {
     )
     @Argument var alias: String
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
-    func run() async throws { try notImplemented("similar") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = SimilarInput(alias: alias, limit: limit ?? 10)
+            emit(try await runSimilar(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct ExpandCommand: AsyncParsableCommand {
@@ -134,7 +198,20 @@ struct ExpandCommand: AsyncParsableCommand {
     @Option(name: .customLong("property")) var property: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
     @Flag(name: .customLong("no-cache")) var noCache: Bool = false
-    func run() async throws { try notImplemented("expand") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = ExpandInput(
+                alias: alias, property: property,
+                limit: limit ?? 20, noCache: noCache
+            )
+            emit(try await runExpand(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct BrowseCommand: AsyncParsableCommand {
@@ -143,7 +220,17 @@ struct BrowseCommand: AsyncParsableCommand {
     )
     @Argument var alias: String
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
-    func run() async throws { try notImplemented("browse") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = BrowseInput(alias: alias, limit: limit ?? 30)
+            emit(try await runBrowse(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct TreeCommand: AsyncParsableCommand {
@@ -154,7 +241,20 @@ struct TreeCommand: AsyncParsableCommand {
     @Option var collection: String?
     @Option var depth: Int?
     @Option(name: .customLong("max-siblings")) var maxSiblings: Int?
-    func run() async throws { try notImplemented("tree") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let client = try Sift.makeAlephClient()
+            let input = TreeInput(
+                alias: alias, collection: collection,
+                depth: depth ?? 3, maxSiblings: maxSiblings ?? 20
+            )
+            emit(try await runTree(client: client, store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct NeighborsCommand: AsyncParsableCommand {
@@ -165,7 +265,19 @@ struct NeighborsCommand: AsyncParsableCommand {
     @Option var direction: String?
     @Option(name: .customLong("property")) var property: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
-    func run() async throws { try notImplemented("neighbors") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let input = NeighborsInput(
+                alias: alias, direction: direction ?? "both",
+                property: property, limit: limit ?? 50
+            )
+            emit(try runNeighbors(store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct RecallCommand: AsyncParsableCommand {
@@ -175,7 +287,18 @@ struct RecallCommand: AsyncParsableCommand {
     @Option var collection: String?
     @Option var schema: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
-    func run() async throws { try notImplemented("recall") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            let input = RecallInput(
+                collection: collection, schema: schema, limit: limit ?? 15
+            )
+            emit(try runRecall(store: store, input: input))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct SQLCommand: AsyncParsableCommand {
@@ -183,7 +306,15 @@ struct SQLCommand: AsyncParsableCommand {
         commandName: "sql", abstract: "Read-only SQL against the cache DB."
     )
     @Argument var query: String
-    func run() async throws { try notImplemented("sql") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            emit(try runSQL(store: store, input: SQLInput(query: query)))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct CacheCommand: AsyncParsableCommand {
@@ -197,13 +328,30 @@ struct CacheCommand: AsyncParsableCommand {
 
 struct CacheStats: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "stats")
-    func run() async throws { try notImplemented("cache stats") }
+    func run() async throws {
+        do {
+            emit(try runCacheStats(store: try openSessionStore()))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 struct CacheClear: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "clear")
     @Option(name: .customLong("older-than-days")) var olderThanDays: Int?
-    func run() async throws { try notImplemented("cache clear") }
+
+    func run() async throws {
+        do {
+            let store = try openSessionStore()
+            emit(try runCacheClear(
+                store: store,
+                input: CacheClearInput(olderThanDays: olderThanDays)
+            ))
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
 }
 
 // MARK: - Export (task #9)
