@@ -1,0 +1,93 @@
+name: release
+
+# Tag-driven: push a `v*` tag that matches the version in
+# Sources/SiftCore/SiftCore.swift, this workflow builds Sift.app,
+# bundles the CLI + pi inside it, ad-hoc signs, zips, attaches the
+# zip to the GitHub Release, and opens a PR against
+# data-desk-eco/homebrew-sift bumping the cask.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # create/edit the GitHub Release
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches Sift.version
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          src=$(make print-version)
+          if [ "$tag" != "$src" ]; then
+            echo "::error::tag v$tag doesn't match Sift.version $src — bump SiftCore.swift before tagging" >&2
+            exit 1
+          fi
+          echo "version=$src" >> "$GITHUB_ENV"
+
+      - name: Install runtime deps
+        run: brew install node llama.cpp
+
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Build release bundle
+        run: make release
+
+      - name: Capture release artefact metadata
+        id: artefact
+        run: |
+          zip=".build/release-bundle/Sift-v${{ env.version }}.zip"
+          sha=$(/usr/bin/shasum -a 256 "$zip" | awk '{print $1}')
+          echo "zip=$zip"          >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha"       >> "$GITHUB_OUTPUT"
+          echo "filename=$(basename $zip)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ env.version }}" \
+            "${{ steps.artefact.outputs.zip }}" \
+            --title "sift v${{ env.version }}" \
+            --generate-notes
+
+      # Cross-repo PR against the homebrew tap. Needs a PAT with
+      # `repo` scope on the tap repo, stored as the TAP_PAT secret.
+      # If the secret isn't set yet (first release), this step is a
+      # no-op and the maintainer updates the cask by hand from the
+      # SHA256 printed in the previous step.
+      - name: Bump cask in homebrew-sift
+        if: ${{ env.TAP_PAT != '' }}
+        env:
+          TAP_PAT: ${{ secrets.TAP_PAT }}
+          VERSION: ${{ env.version }}
+          SHA256: ${{ steps.artefact.outputs.sha256 }}
+          FILENAME: ${{ steps.artefact.outputs.filename }}
+        run: |
+          set -euo pipefail
+          tap=$(mktemp -d)
+          git clone "https://x-access-token:${TAP_PAT}@github.com/data-desk-eco/homebrew-sift.git" "$tap"
+          cd "$tap"
+          git checkout -b "bump-v${VERSION}"
+
+          cask="Casks/sift.rb"
+          /usr/bin/sed -i '' \
+            -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
+            -e "s|^  sha256 \".*\"|  sha256 \"${SHA256}\"|" \
+            "$cask"
+
+          git config user.name  "sift release bot"
+          git config user.email "noreply@datadesk.eco"
+          git add "$cask"
+          git commit -m "sift v${VERSION}"
+          git push -u origin "bump-v${VERSION}"
+          GH_TOKEN="$TAP_PAT" gh pr create \
+            --repo data-desk-eco/homebrew-sift \
+            --title "sift v${VERSION}" \
+            --body "Auto-bumped by sift release workflow.\n\nSHA256: \`${SHA256}\`"

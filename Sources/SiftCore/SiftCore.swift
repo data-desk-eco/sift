@@ -1,7 +1,7 @@
 import Foundation
 
 public enum Sift {
-    public static let version = "0.1.0-dev"
+    public static let version = "0.1.0"
 
     /// Quick check used by `ensureInitialized()`.
     public static var isInitialized: Bool {

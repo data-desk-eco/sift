@@ -16,28 +16,60 @@ public enum Paths {
     public static var initMarker: URL { siftHome.appending(path: ".initialized") }
     public static var systemPromptFile: URL { siftHome.appending(path: "system-prompt.md") }
 
-    /// Where the installer drops sift-owned tooling so we don't pollute
-    /// npm globals and so uninstalling sift cleans up after itself.
-    /// pi lives under here as a local npm install.
+    /// Legacy install location for sift-owned tooling. Kept so that
+    /// dev installs via `make install` still work (they drop pi here);
+    /// brew-cask installs put pi inside Sift.app instead.
     public static var supportDir: URL {
         URL(filePath: NSHomeDirectory())
             .appending(path: "Library/Application Support/Sift")
     }
 
+    /// The Sift.app root, if the running process can find it by walking
+    /// up from its own executable. Returns nil for dev / `swift run`
+    /// builds where there is no enclosing .app. Works for both the
+    /// menu bar app (whose Bundle.main IS the .app) and the CLI (whose
+    /// Bundle.main is `Sift.app/Contents/Resources/bin`).
+    public static func bundledAppRoot() -> URL? {
+        var url = Bundle.main.bundleURL
+        for _ in 0..<6 {
+            if url.pathExtension == "app" { return url }
+            let parent = url.deletingLastPathComponent()
+            if parent == url { return nil }
+            url = parent
+        }
+        return nil
+    }
+
+    /// In-bundle pi install (preferred for brew-cask installs) or the
+    /// legacy support-dir location (for dev `make install`).
     public static var bundledPiBin: URL {
-        supportDir.appending(path: "pi/node_modules/.bin/pi")
+        if let app = bundledAppRoot() {
+            return app.appending(path: "Contents/Resources/pi/node_modules/.bin/pi")
+        }
+        return supportDir.appending(path: "pi/node_modules/.bin/pi")
+    }
+
+    /// In-bundle CLI (when running inside Sift.app) — used by the menu
+    /// bar app, which lives in the same bundle and can't trust $PATH
+    /// since GUI apps don't inherit the user's shell environment.
+    public static var bundledCLIBin: URL? {
+        bundledAppRoot()?.appending(path: "Contents/Resources/bin/sift")
     }
 
     /// Resolve an executable, preferring sift-bundled tooling over the
-    /// user's `$PATH`. Currently special-cases `pi` (installed by the
-    /// sift installer into our support dir); everything else goes
-    /// straight to PATH.
+    /// user's `$PATH`. Special-cases `pi` (bundled inside Sift.app, or
+    /// in `~/Library/Application Support/Sift/pi/` for dev installs)
+    /// and `sift` (bundled inside Sift.app).
     public static func findExecutable(_ name: String) -> String? {
         if name == "pi" {
             let bundled = bundledPiBin.path
             if FileManager.default.isExecutableFile(atPath: bundled) {
                 return bundled
             }
+        }
+        if name == "sift", let bundled = bundledCLIBin?.path,
+           FileManager.default.isExecutableFile(atPath: bundled) {
+            return bundled
         }
         // Fall back to PATH.
         guard let path = ProcessInfo.processInfo.environment["PATH"] else {

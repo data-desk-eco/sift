@@ -6,7 +6,7 @@ A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.or
 
 ```bash
 # install
-curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
+brew install --cask data-desk-eco/sift/sift
 
 # one-time setup: vault, Aleph creds, LLM backend
 sift init
@@ -37,7 +37,7 @@ After the third command the menu bar app pops up, the agent runs in the backgrou
 - An Aleph or OpenAleph account with an API key
 - For the local backend: ≥24 GB unified memory (~12 GB model download on first run)
 
-## Manual install
+## Build from source
 
 ```bash
 brew install node llama.cpp
@@ -45,7 +45,7 @@ git clone https://github.com/data-desk-eco/sift && cd sift
 make install
 ```
 
-`~/.local/bin` must be on `PATH`. Wipe with `make uninstall` — your vault under `~/.sift/` is preserved.
+This is the contributor / dev path. `make install` builds, ad-hoc signs, and drops the CLI in `~/.local/bin/sift` and the app in `/Applications/Sift.app`. `make uninstall` reverses it; your vault under `~/.sift/` is preserved.
 
 ## License
 

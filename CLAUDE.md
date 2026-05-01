@@ -18,8 +18,10 @@ Native macOS tool for investigating subjects in Aleph / OpenAleph, plus a self-d
 ## Working in this repo
 
 - Build: `make build` (CLI + signed app bundle) or `swift build -c release --product sift` for just the CLI.
-- Install to `~/.local/bin` + `/Applications`: `make install`. Pi is installed locally to `~/Library/Application Support/Sift/pi/` (no npm globals); `Paths.findExecutable("pi")` checks there first, then `$PATH`.
-- Wipe the install: `make uninstall` (keeps the user's vault state under `~/.sift/`).
+- Dev install to `~/.local/bin` + `/Applications`: `make install`. Pi goes to `~/Library/Application Support/Sift/pi/`.
+- Production install (what users actually run): `brew install --cask data-desk-eco/sift/sift`. The cask points at a release zip built by `.github/workflows/release.yml`; the resulting `Sift.app` bundles the CLI at `Contents/Resources/bin/sift` and pi at `Contents/Resources/pi/`. `Paths.findExecutable` walks up from `Bundle.main` to find the .app and prefers in-bundle tooling, falling back to the support-dir layout for dev installs.
+- Cut a release: bump `Sources/SiftCore/SiftCore.swift` `version`, commit, `git tag v<X.Y.Z>`, `git push --tags`. The workflow builds the bundle, attaches the zip to the release, and (if `TAP_PAT` secret is set) opens a PR against `data-desk-eco/homebrew-sift` bumping the cask. Locally: `make release` produces the same artefact under `.build/release-bundle/`.
+- Wipe the dev install: `make uninstall` (keeps the user's vault state under `~/.sift/`).
 - Tests live in `Tests/SiftCoreTests/` (XCTest). They compile under Xcode but `swift test` won't work on a Command Line Tools-only host — XCTest isn't shipped. Run them via Xcode or a CI runner with full Xcode.
 - Every CLI smoke test must use `SIFT_HOME=/tmp/something` — see the feedback memory.
 - The agent voice in `Resources/AGENTS.md` and `Resources/sift/SKILL.md` is deliberately neutral / wire-service. Don't loosen it when editing prompts.

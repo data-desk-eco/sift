@@ -85,11 +85,25 @@ struct InvestigateSubjectIntent: AppIntent {
     }
 
     private func resolveSiftBinary() throws -> String {
-        // Prefer the binary next to the running app (typical install layout
-        // places `sift` in ~/.local/bin and Sift.app in /Applications). If
-        // it's not adjacent, walk PATH the same way `which` would.
+        // Prefer the in-bundle CLI (brew-cask installs ship sift inside
+        // Sift.app/Contents/Resources/bin), then fall back to PATH for
+        // dev installs. GUI apps don't inherit shell PATH, so we
+        // augment with the common Homebrew prefixes that the user's
+        // shell would add.
+        if let bundled = Paths.bundledCLIBin?.path,
+           FileManager.default.isExecutableFile(atPath: bundled) {
+            return bundled
+        }
         let env = ProcessInfo.processInfo.environment
-        let path = env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
+        let userPath = env["PATH"] ?? ""
+        let path = [
+            userPath,
+            "/opt/homebrew/bin",
+            "\(NSHomeDirectory())/.local/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        ].filter { !$0.isEmpty }.joined(separator: ":")
         for dir in path.split(separator: ":") {
             let candidate = "\(dir)/sift"
             if FileManager.default.isExecutableFile(atPath: candidate) {
@@ -97,8 +111,8 @@ struct InvestigateSubjectIntent: AppIntent {
             }
         }
         throw SiftError(
-            "sift CLI not found on PATH",
-            suggestion: "install with the curl|bash installer, or 'brew install sift'"
+            "sift CLI not found",
+            suggestion: "install with `brew install --cask data-desk-eco/sift/sift`"
         )
     }
 
