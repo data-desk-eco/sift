@@ -1,6 +1,6 @@
 # sift
 
-Native macOS tool for investigating subjects in Aleph / OpenAleph, plus a self-driving agent mode (`sift auto`) built on the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) harness. Same command surface for humans and agents. Swift implementation; Python predecessor lived under `src/sift/` and was removed when the Swift port reached parity.
+Native macOS tool for investigating subjects in Aleph / OpenAleph, plus a self-driving agent mode (`sift auto`) built on the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) harness. Same command surface for humans and agents. Swift implementation; Python predecessor lived under `src/sift/` and was removed when the Swift port reached parity.
 
 ## Vault & credentials
 

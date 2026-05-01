@@ -22,8 +22,15 @@ public final class Store {
             sqlite3_close(db)
             throw SiftError("failed to open \(dbPath.path): \(msg)")
         }
-        // Pragmas for sane multi-process behaviour and durability.
-        try exec("PRAGMA journal_mode=WAL")
+        // Wait up to 5s on a contended lock — the daemon, menu-bar app, and
+        // manual CLI all share aleph.sqlite, so transient contention is normal.
+        sqlite3_busy_timeout(db, 5000)
+        // WAL mode persists in the DB header. Re-setting it on every connect
+        // takes an exclusive lock and races other processes; only set it when
+        // the DB is not already in WAL.
+        if try currentJournalMode().lowercased() != "wal" {
+            try exec("PRAGMA journal_mode=WAL")
+        }
         try exec("PRAGMA foreign_keys=ON")
 
         try exec(Self.schema)
@@ -373,6 +380,13 @@ public final class Store {
         try Self.bindAll(stmt, binds)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return Self.rowDict(stmt)
+    }
+
+    private func currentJournalMode() throws -> String {
+        let stmt = try prepare("PRAGMA journal_mode")
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return "" }
+        return Self.columnText(stmt, 0) ?? ""
     }
 
     private func queryInt(_ sql: String) throws -> Int {

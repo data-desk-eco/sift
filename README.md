@@ -2,7 +2,7 @@
 
 A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/) — search documents, emails, and entities, follow extracted links, browse folder trees. Credentials live in the macOS Keychain (Touch ID gated); reports and the local cache live in an encrypted sparseimage at `~/.sift/.vault.sparseimage`.
 
-The same command surface is shared between humans and agents: `sift search`, `sift read`, `sift vault …` work the same whether invoked at the prompt or called by the agent under `sift auto "investigate …"`. `sift auto "PROMPT"` runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent as a detached daemon and returns to the shell — the menu bar item shows live progress, posts a notification when done, and gives one-click access to `report.md`. Two LLM backends are supported: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves the machine except Aleph queries), or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …).
+The same command surface is shared between humans and agents: `sift search`, `sift read`, `sift vault …` work the same whether invoked at the prompt or called by the agent under `sift auto "investigate …"`. `sift auto "PROMPT"` runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon and returns to the shell — the menu bar item shows live progress, posts a notification when done, and gives one-click access to `report.md`. Two LLM backends are supported: a local Qwen3.6 35B served by [llama.cpp](https://github.com/ggml-org/llama.cpp) (default; nothing leaves the machine except Aleph queries), or any hosted OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI, …).
 
 ## Install
 
@@ -10,7 +10,7 @@ The same command surface is shared between humans and agents: `sift search`, `si
 curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
 ```
 
-The installer pulls in runtime dependencies via Homebrew (`node`, `llama.cpp`), clones the source tree to `~/Library/Application Support/Sift/src`, builds the Swift binary + menu bar app with `swift build -c release`, ad-hoc codesigns them, installs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness locally into `~/Library/Application Support/Sift/pi/` (no npm globals are touched), and drops `sift` in `~/.local/bin/` and `Sift.app` in `/Applications/`. `~/.local/bin` must be on `PATH`. To remove everything later: `make uninstall`.
+The installer pulls in runtime dependencies via Homebrew (`node`, `llama.cpp`), clones the source tree to `~/Library/Application Support/Sift/src`, builds the Swift binary + menu bar app with `swift build -c release`, ad-hoc codesigns them, installs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent harness locally into `~/Library/Application Support/Sift/pi/` (no npm globals are touched), and drops `sift` in `~/.local/bin/` and `Sift.app` in `/Applications/`. `~/.local/bin` must be on `PATH`. To remove everything later: `make uninstall`.
 
 To install manually:
 

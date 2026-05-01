@@ -50,7 +50,34 @@ final class RunStateModel {
     // MARK: - Reload
 
     func reload() {
-        states = RunRegistry.list()
+        let next = RunRegistry.list()
+        notifyTransitions(prev: states, next: next)
+        states = next
+    }
+
+    /// Detect sessions that just transitioned out of `.running` and post
+    /// a native notification. We only fire when we've previously seen the
+    /// session as running, so finished sessions present at app launch
+    /// don't generate stale notifications.
+    private func notifyTransitions(prev: [RunState], next: [RunState]) {
+        let prevByName = Dictionary(uniqueKeysWithValues: prev.map { ($0.session, $0) })
+        for state in next {
+            guard let old = prevByName[state.session],
+                  old.status == .running, state.status != .running
+            else { continue }
+            let title: String
+            switch state.status {
+            case .finished: title = "sift: investigation complete"
+            case .failed:   title = "sift: investigation failed"
+            case .stopped:  title = "sift: investigation stopped"
+            default: continue
+            }
+            Notifier.shared.post(
+                title: title,
+                body: "Session \(state.session) — open report.md or run `sift logs`",
+                sessionDir: state.sessionDir
+            )
+        }
     }
 
     // MARK: - DispatchSource watcher

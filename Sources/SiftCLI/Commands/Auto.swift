@@ -75,7 +75,7 @@ struct AutoCommand: AsyncParsableCommand {
             )
         } else {
             // New detached session — name it via AI slug (or regex fallback).
-            let name = await PiRunner.newSessionName(prompt: promptText)
+            let name = await PiRunner.newSessionName(prompt: promptText, researchDir: researchDir)
             resolution = PiRunner.SessionResolution(
                 sessionDir: researchDir.appending(path: name),
                 resuming: false, staleAge: nil

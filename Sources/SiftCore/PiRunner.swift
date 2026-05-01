@@ -51,12 +51,8 @@ public enum PiRunner {
             return SessionResolution(sessionDir: last, resuming: true, staleAge: stale)
         }
         if let prompt, !prompt.isEmpty {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd-HHmmss"
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            let ts = formatter.string(from: Date())
-            let slug = (freshSlug?.isEmpty == false) ? freshSlug! : ts
-            let name = freshSlug.map { _ in "\(ts)-\(slug)" } ?? ts
+            let base = (freshSlug?.isEmpty == false) ? freshSlug! : fallbackTimestamp()
+            let name = uniqueName(researchDir: researchDir, base: base)
             return SessionResolution(
                 sessionDir: researchDir.appending(path: name),
                 resuming: false, staleAge: nil
@@ -105,6 +101,10 @@ public enum PiRunner {
 
         var env = ProcessInfo.processInfo.environment
         env["PI_CODING_AGENT_DIR"] = Paths.piConfigDir.path
+        // Run pi in offline mode: no version-check banner, no package-update
+        // banner, no startup network calls. Sift bundles its own pi and
+        // controls its lifecycle; users don't manage updates themselves.
+        env["PI_OFFLINE"] = "1"
         env["VAULT_MOUNT"] = mp.path
         env["ALEPH_SESSION_DIR"] = researchDir.path
         env["ALEPH_SESSION"] = sessionDir.lastPathComponent
@@ -249,7 +249,8 @@ public enum PiRunner {
             st.finishedAt = now
             st.lastEventAt = now
         }
-        notifyFinished(session: prelaunch.session, success: code == 0)
+        // The menu bar app posts a native UNUserNotification when it
+        // sees the run-state file flip out of `.running`.
         return code
     }
 
@@ -276,13 +277,36 @@ public enum PiRunner {
         return "\(Int(hours / 24))d"
     }
 
-    public static func newSessionName(prompt: String) async -> String {
+    /// Build a session name from the LLM-generated slug. Falls back to a
+    /// timestamp only when slug generation fails (and the caller will
+    /// pass it through `uniqueName` to avoid colliding with an existing
+    /// directory).
+    public static func newSessionName(prompt: String, researchDir: URL) async -> String {
         let slug = await AISlug.make(prompt: prompt)
+        let base = slug.isEmpty ? fallbackTimestamp() : slug
+        return uniqueName(researchDir: researchDir, base: base)
+    }
+
+    static func fallbackTimestamp() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        let ts = formatter.string(from: Date())
-        return slug.isEmpty ? ts : "\(ts)-\(slug)"
+        return formatter.string(from: Date())
+    }
+
+    /// Append `-2`, `-3`, … if `<researchDir>/<base>` is already taken.
+    /// Slugs aren't guaranteed unique across investigations of the same
+    /// subject; collisions are rare but real.
+    static func uniqueName(researchDir: URL, base: String) -> String {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: researchDir.appending(path: base).path) {
+            return base
+        }
+        var n = 2
+        while fm.fileExists(atPath: researchDir.appending(path: "\(base)-\(n)").path) {
+            n += 1
+        }
+        return "\(base)-\(n)"
     }
 
     /// pi is installed by sift's installer into Application Support; the
@@ -313,14 +337,6 @@ public enum PiRunner {
         return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
 
-    private static func notifyFinished(session: String, success: Bool) {
-        let title = success ? "sift: investigation complete" : "sift: investigation failed"
-        let body = "Session \(session) — open report.md or run `sift logs`"
-        let safeTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-        let safeBody = body.replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "display notification \"\(safeBody)\" with title \"\(safeTitle)\""
-        _ = try? Subprocess.run(["/usr/bin/osascript", "-e", script])
-    }
 }
 
 // MARK: - execvpe wrapper

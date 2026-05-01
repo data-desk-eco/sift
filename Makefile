@@ -17,7 +17,7 @@ APP_BUNDLE := $(APP_NAME).app
 # uninstalling sift cleans up after itself.
 SUPPORT_DIR := $(HOME)/Library/Application Support/Sift
 PI_DIR := $(SUPPORT_DIR)/pi
-PI_PACKAGE := @mariozechner/pi
+PI_PACKAGE := @mariozechner/pi-coding-agent
 
 .PHONY: all build cli app bundle codesign install install-cli install-app install-pi uninstall run clean
 
@@ -76,9 +76,16 @@ install-cli: cli
 	@echo "cli      -> $(BINDIR)/sift"
 
 install-app: app
+	@# Quit any running copy first so the freshly installed binary is
+	@# the one macOS launches; otherwise the old process keeps running
+	@# and the user sees stale behaviour after `make install`.
+	@osascript -e 'tell application id "eco.datadesk.sift.menubar" to quit' 2>/dev/null || true
+	@pkill -f "$(APPDIR)/$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)" 2>/dev/null || true
 	@rm -rf $(APPDIR)/$(APP_BUNDLE)
 	@cp -R $(APP_BUNDLE) $(APPDIR)/$(APP_BUNDLE)
 	@echo "app      -> $(APPDIR)/$(APP_BUNDLE)"
+	@open -ga "$(APPDIR)/$(APP_BUNDLE)"
+	@echo "app      -> launched (menu bar)"
 
 run: install-cli
 	$(BINDIR)/sift --help

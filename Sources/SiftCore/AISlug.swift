@@ -3,7 +3,7 @@ import Foundation
 /// Ask the configured backend for a kebab-case slug for a session.
 /// Falls back to a regex slug of the prompt if the LLM call fails.
 public enum AISlug {
-    public static func make(prompt: String, timeout: TimeInterval = 8) async -> String {
+    public static func make(prompt: String, timeout: TimeInterval = 60) async -> String {
         if let aiSlug = await callBackend(prompt: prompt, timeout: timeout), !aiSlug.isEmpty {
             return aiSlug
         }
@@ -72,18 +72,39 @@ public enum AISlug {
         let trimmed = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         guard let url = URL(string: "\(trimmed)/chat/completions") else { return nil }
 
+        let systemPrompt = """
+            You name OSINT investigation sessions with a concise, distinctive slug.
+
+            Rules:
+            - 2 to 5 lowercase words, separated by hyphens.
+            - Identify the *subject* (person, company, vessel, place, document) — the proper noun, not the action.
+            - Drop generic verbs like "investigate", "research", "look into", "find".
+            - Drop filler like "the", "and", "of", articles, conjunctions.
+            - No punctuation other than hyphens. No quotes, no commentary, no preface.
+            - Output ONLY the slug on the final line.
+
+            Examples:
+            Investigation: who owns the cargo ship Stella M and what cargo did it carry between 2022 and 2024
+            stella-m-ownership
+
+            Investigation: look into the relationship between Wirecard and Jan Marsalek's network in Russia
+            wirecard-marsalek-russia
+
+            Investigation: any signs that Acme Corp is a shell for sanctioned Russian oligarchs
+            acme-corp-shell-russia
+
+            Investigation: trace ownership of the property at 12 Bishop's Avenue London
+            bishops-avenue-property
+            """
         let body: [String: Any] = [
             "model": config.modelName,
             "messages": [
-                ["role": "system",
-                 "content": "You name research sessions with a short slug. "
-                    + "Output only the slug — 2 to 5 lowercase words separated "
-                    + "by hyphens, no punctuation, no quotes, no commentary, "
-                    + "no preface. Focus on the subject of the investigation, "
-                    + "not generic verbs."],
+                ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": "Investigation: \(prompt)"],
             ],
-            "max_tokens": 32,
+            // Generous ceiling to accommodate reasoning-model thinking tokens;
+            // sanitize() strips <think>…</think> and keeps only the final line.
+            "max_tokens": 2048,
             "temperature": 0.2,
         ]
 
