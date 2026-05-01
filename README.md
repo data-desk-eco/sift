@@ -34,8 +34,8 @@ In headless mode the agent writes to `report.md` in a per-run session directory 
 The agent's tools are also available directly:
 
 ```bash
-sift search query="..." [collection=<id>]
-sift read alias=r5
+sift search "..." [--collection <id>]
+sift read r5
 sift vault status
 ```
 
