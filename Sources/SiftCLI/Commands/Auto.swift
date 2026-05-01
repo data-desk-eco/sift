@@ -57,12 +57,31 @@ struct AutoCommand: AsyncParsableCommand {
         let researchDir = mp.appending(path: "research")
         try Paths.ensure(researchDir)
 
+        // The active lead — if set and still on disk — wins over
+        // "most recent" so the user can pin a particular investigation
+        // and have every `sift auto` invocation default back to it.
+        let leadDir: URL? = ActiveLead.get().flatMap { name in
+            let candidate = researchDir.appending(path: name)
+            return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+        }
+
         let resolution: PiRunner.SessionResolution
         if promptText.isEmpty {
-            // REPL: continue most recent unless --new.
-            resolution = PiRunner.resolveSession(
-                researchDir: researchDir, prompt: nil,
-                newSession: new, freshSlug: nil
+            // REPL: continue active lead, else most recent, unless --new.
+            if !new, let lead = leadDir {
+                resolution = PiRunner.SessionResolution(
+                    sessionDir: lead, resuming: true, staleAge: nil
+                )
+            } else {
+                resolution = PiRunner.resolveSession(
+                    researchDir: researchDir, prompt: nil,
+                    newSession: new, freshSlug: nil
+                )
+            }
+        } else if !new, let lead = leadDir {
+            // Detached run against the active lead.
+            resolution = PiRunner.SessionResolution(
+                sessionDir: lead, resuming: true, staleAge: nil
             )
         } else if !new, let last = PiRunner.mostRecentSession(researchDir: researchDir) {
             // Detached resume.
@@ -80,6 +99,9 @@ struct AutoCommand: AsyncParsableCommand {
                 sessionDir: researchDir.appending(path: name),
                 resuming: false, staleAge: nil
             )
+            // Pin a fresh session as the active lead — that's almost
+            // always what the user wants next.
+            ActiveLead.set(name)
         }
 
         // Foreground REPL.
@@ -109,6 +131,10 @@ struct AutoCommand: AsyncParsableCommand {
                 ))
             }
         }
+
+        // Launch the menu bar app (if installed) so the user sees the
+        // run light up immediately rather than having to open it by hand.
+        PiRunner.ensureMenuBarRunning()
 
         try await spawnDaemon(
             sessionDir: resolution.sessionDir, resuming: resolution.resuming,

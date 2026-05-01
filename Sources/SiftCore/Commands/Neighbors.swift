@@ -55,7 +55,7 @@ public func runNeighbors(store: Store, input: NeighborsInput) throws -> String {
             + "try `expand` or `read` first)")
     }
 
-    var header = "neighbors \(input.alias)"
+    var header = "neighbours \(input.alias)"
     if let p = input.property { header += " --property \(p)" }
     if direction != "both"   { header += " --direction \(direction)" }
     return Render.envelope(header, lines.joined(separator: "\n"))

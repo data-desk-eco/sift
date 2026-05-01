@@ -3,10 +3,19 @@ import Foundation
 /// Ask the configured backend for a kebab-case slug for a session.
 /// Falls back to a regex slug of the prompt if the LLM call fails.
 public enum AISlug {
-    public static func make(prompt: String, timeout: TimeInterval = 60) async -> String {
+    /// `timeout` defaults to 8s. With `/no_think` and a warm idle local
+    /// backend, slug generation finishes in well under a second; the
+    /// short ceiling exists because the backend may be saturated by
+    /// another active `sift auto` run (llama.cpp serializes requests),
+    /// in which case we'd rather fall back to a regex slug than block
+    /// the user.
+    public static func make(prompt: String, timeout: TimeInterval = 8) async -> String {
         if let aiSlug = await callBackend(prompt: prompt, timeout: timeout), !aiSlug.isEmpty {
             return aiSlug
         }
+        FileHandle.standardError.write(Data(
+            "[slug]     LLM unavailable or slow — using regex slug\n".utf8
+        ))
         return regexSlug(prompt)
     }
 
@@ -96,16 +105,20 @@ public enum AISlug {
             Investigation: trace ownership of the property at 12 Bishop's Avenue London
             bishops-avenue-property
             """
+        // `/no_think` is a Qwen3 directive that suppresses the reasoning
+        // loop for this request — turns a 30-60s call into a <1s one and
+        // the slug task doesn't benefit from thinking anyway. Hosted
+        // OpenAI-compatible models will simply ignore the token.
         let body: [String: Any] = [
             "model": config.modelName,
             "messages": [
                 ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": "Investigation: \(prompt)"],
+                ["role": "user", "content": "/no_think\nInvestigation: \(prompt)"],
             ],
-            // Generous ceiling to accommodate reasoning-model thinking tokens;
-            // sanitize() strips <think>…</think> and keeps only the final line.
-            "max_tokens": 2048,
+            "max_tokens": 64,
             "temperature": 0.2,
+            // Defensive: some chat templates honor this kwarg too.
+            "chat_template_kwargs": ["enable_thinking": false],
         ]
 
         var request = URLRequest(url: url)

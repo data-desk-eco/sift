@@ -113,7 +113,6 @@ define INFO_PLIST
   <key>CFBundleVersion</key>                <string>1</string>
   <key>LSMinimumSystemVersion</key>         <string>14.0</string>
   <key>LSUIElement</key>                    <true/>
-  <key>NSAppleEventsUsageDescription</key>  <string>Sift uses Terminal to show live agent logs.</string>
   <key>NSHumanReadableCopyright</key>       <string>MIT licensed.</string>
   <key>NSSupportsAutomaticTermination</key> <true/>
   <key>NSSupportsSuddenTermination</key>    <true/>

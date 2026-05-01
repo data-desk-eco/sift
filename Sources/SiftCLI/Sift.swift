@@ -10,25 +10,17 @@ struct SiftRoot: AsyncParsableCommand {
         discussion: """
             All state lives under ~/.sift (vault, models, pi config, run state).
             Secrets live in the macOS Keychain. Vault unlock is gated by Touch ID.
+
+            The Aleph and cache groups are the same surface the agent uses
+            during `sift auto` runs — they're listed first because you'll
+            reach for them most. The setup, auto and report groups below
+            are for managing your own work.
             """,
         version: Sift.version,
         subcommands: [DaemonRunCommand.self],
         groupedSubcommands: [
-            CommandGroup(name: "Setup", subcommands: [
-                InitCommand.self,
-                VaultCommand.self,
-                BackendCommand.self,
-                ProjectCommand.self,
-            ]),
-            CommandGroup(name: "Agent", subcommands: [
-                AutoCommand.self,
-                StatusCommand.self,
-                LogsCommand.self,
-                AttachCommand.self,
-                StopCommand.self,
-                TimeCommand.self,
-            ]),
-            CommandGroup(name: "Aleph queries", subcommands: [
+            // Agent-facing tools (also fine to call interactively).
+            CommandGroup(name: "Aleph", subcommands: [
                 SearchCommand.self,
                 ReadCommand.self,
                 SourcesCommand.self,
@@ -39,12 +31,30 @@ struct SiftRoot: AsyncParsableCommand {
                 TreeCommand.self,
                 NeighborsCommand.self,
             ]),
-            CommandGroup(name: "Local cache", subcommands: [
+            // The agent's self-knowledge tools: what's already in the
+            // local cache, and how much time is left on the clock.
+            CommandGroup(name: "Memory", subcommands: [
                 RecallCommand.self,
                 SQLCommand.self,
                 CacheCommand.self,
+                TimeCommand.self,
             ]),
-            CommandGroup(name: "Reports", subcommands: [
+            // Human-facing — manage your sift install + auto runs.
+            CommandGroup(name: "Setup", subcommands: [
+                InitCommand.self,
+                VaultCommand.self,
+                BackendCommand.self,
+                ProjectCommand.self,
+            ]),
+            CommandGroup(name: "Auto", subcommands: [
+                AutoCommand.self,
+                LeadCommand.self,
+                StatusCommand.self,
+                LogsCommand.self,
+                AttachCommand.self,
+                StopCommand.self,
+            ]),
+            CommandGroup(name: "Report", subcommands: [
                 ExportCommand.self,
             ]),
         ]

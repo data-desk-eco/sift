@@ -22,17 +22,24 @@ struct StopCommand: AsyncParsableCommand {
                 target = s
             } else {
                 let active = RunRegistry.active()
-                if active.count == 0 {
+                if active.count == 1 {
+                    target = active[0]
+                } else if active.count > 1 {
+                    // Prefer the active lead when several runs are live;
+                    // fall back to demanding an explicit name otherwise.
+                    if let lead = ActiveLead.get(),
+                       let s = active.first(where: { $0.session == lead }) {
+                        target = s
+                    } else {
+                        let names = active.map { $0.session }.joined(separator: ", ")
+                        throw SiftError(
+                            "multiple running sessions",
+                            suggestion: "specify one: \(names)"
+                        )
+                    }
+                } else {
                     throw SiftError("no running sift auto session")
                 }
-                if active.count > 1 {
-                    let names = active.map { $0.session }.joined(separator: ", ")
-                    throw SiftError(
-                        "multiple running sessions",
-                        suggestion: "specify one: \(names)"
-                    )
-                }
-                target = active[0]
             }
 
             if !RunRegistry.pidAlive(target.pid) {

@@ -210,7 +210,7 @@ struct TreeCommand: AsyncParsableCommand {
 
 struct NeighborsCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "neighbors", abstract: "Show every cached edge touching an entity."
+        commandName: "neighbours", abstract: "Show every cached edge touching an entity."
     )
     @Argument var alias: String
     @Option var direction: String?

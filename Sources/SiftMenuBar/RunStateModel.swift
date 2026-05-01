@@ -133,31 +133,36 @@ final class RunStateModel {
         }
     }
 
-    /// Open Terminal.app and run `sift logs -f <session>`. Uses
-    /// osascript because there's no AppKit API for "open terminal with
-    /// command" without breaking on Terminal-vs-iTerm divergence.
+    /// Open the user's default terminal and run `sift logs -f <session>`.
+    /// We write a `.command` file and let Launch Services dispatch it —
+    /// macOS opens `.command` files in whatever the user has set as the
+    /// default app (Terminal.app out of the box, but Ghostty / iTerm /
+    /// Wezterm if the user has changed it via Finder → Get Info →
+    /// Open With → Change All).
     func tailLog(_ state: RunState) {
-        let command = "sift logs -f \(shellQuote(state.session))"
+        let siftPath = ProcessInfo.processInfo.environment["HOME"]
+            .map { "\($0)/.local/bin/sift" } ?? "sift"
         let script = """
-            tell application "Terminal"
-                activate
-                do script "\(escapedAppleScript(command))"
-            end tell
+            #!/bin/zsh -l
+            exec \(shellQuote(siftPath)) logs -f \(shellQuote(state.session))
             """
-        let proc = Process()
-        proc.executableURL = URL(filePath: "/usr/bin/osascript")
-        proc.arguments = ["-e", script]
-        try? proc.run()
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "sift-tail-\(state.session).command")
+        do {
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: url.path
+            )
+            NSWorkspace.shared.open(url)
+        } catch {
+            // Fallback: open in Finder so the user can investigate.
+            openInFinder(state)
+        }
     }
 
     private func shellQuote(_ s: String) -> String {
         if s.range(of: #"^[A-Za-z0-9_./-]+$"#, options: .regularExpression) != nil { return s }
         return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    private func escapedAppleScript(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
 

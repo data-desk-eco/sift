@@ -5,11 +5,14 @@ import SiftCore
 struct StatusCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
-        abstract: "Show running auto-session(s) and recent finishes."
+        abstract: "Show running and recently-finished auto-sessions."
     )
+
     @Flag(name: [.short, .customLong("all")],
-          help: "include finished sessions, not just running ones")
+          help: "include every session on record, not just the most recent finishes")
     var all: Bool = false
+
+    private static let recentLimit = 10
 
     func run() async throws {
         let states = RunRegistry.list()
@@ -17,36 +20,50 @@ struct StatusCommand: AsyncParsableCommand {
             print("(no sift auto sessions on record)")
             return
         }
+
         let now = Int(Date().timeIntervalSince1970)
+        let visible = all ? states : trimToRecent(states, limit: Self.recentLimit)
+        let lead = ActiveLead.get()
+
         var rows: [[String]] = []
-        for state in states {
+        for state in visible {
             let live = state.status == .running && RunRegistry.pidAlive(state.pid)
-            if !all, !live, state.status == .running {
-                // Stale running entry whose pid is gone.
-            } else if !all, !live {
-                continue
-            }
-            let elapsed = formatElapsed(now - state.startedAt)
-            let lastEvent = state.lastScope.isEmpty
-                ? "(no events)"
-                : "\(state.lastScope)  \(state.lastMessage)"
             let status: String
             if live { status = "running" }
             else if state.status == .running { status = "stale" }
             else { status = state.status.rawValue }
+
+            let ageRef = (state.status == .running) ? state.startedAt : (state.finishedAt ?? state.startedAt)
+            let age = formatElapsed(now - ageRef)
+
+            let lastEvent = state.lastScope.isEmpty
+                ? "(no events)"
+                : "\(state.lastScope)  \(state.lastMessage)"
+
+            // Asterisk in the leftmost column marks the active lead, so
+            // `sift status` doubles as "which one will `sift auto`
+            // resume by default".
+            let marker = (state.session == lead) ? "*" : " "
+
             rows.append([
+                marker,
                 state.session,
                 status,
-                elapsed,
+                age,
                 String(state.pid),
                 Render.short(lastEvent, width: 60),
             ])
         }
-        if rows.isEmpty {
-            print("(no running sift auto sessions)")
-            return
-        }
-        print(Table.render(rows, headers: ["session", "status", "age", "pid", "last"]))
+        print(Table.render(rows, headers: [" ", "session", "status", "age", "pid", "last"]))
+    }
+
+    /// All currently-running sessions, plus up to `limit` most recent
+    /// terminal ones. `RunRegistry.list()` already returns rows sorted
+    /// by `startedAt` descending.
+    private func trimToRecent(_ states: [RunState], limit: Int) -> [RunState] {
+        let running = states.filter { $0.status == .running }
+        let terminal = states.filter { $0.status != .running }.prefix(limit)
+        return running + terminal
     }
 
     private func formatElapsed(_ s: Int) -> String {

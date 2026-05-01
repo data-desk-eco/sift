@@ -141,15 +141,15 @@ sift recall [--collection <id>] [--schema <S>] [--limit 15]
 
 Use this at the start of a session to see what prior investigations have already pulled in — same alias table, same entities.
 
-### `neighbors`
+### `neighbours`
 
 Show every edge sift has cached for an entity, grouped by FtM property. Built from data already returned by `read` / `expand` / `search`, so coverage is partial — but for entities you've already explored it lets you re-walk the graph without spending API calls.
 
 ```
-sift neighbors <alias> [--direction out|in|both] [--property <name>] [--limit 50]
+sift neighbours <alias> [--direction out|in|both] [--property <name>] [--limit 50]
 ```
 
-If neighbors returns "(no cached edges)", run `sift expand <alias>` first to populate them.
+If neighbours returns "(no cached edges)", run `sift expand <alias>` first to populate them.
 
 ### `sql`
 

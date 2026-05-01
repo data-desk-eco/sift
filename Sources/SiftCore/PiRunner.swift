@@ -277,6 +277,18 @@ public enum PiRunner {
         return "\(Int(hours / 24))d"
     }
 
+    /// Bring up the bundled menu bar app so a freshly spawned daemon
+    /// gets a live status indicator without the user having to click
+    /// anything. `open -gb` is idempotent — a no-op if the app is
+    /// already running, and silently fails if Sift.app isn't installed
+    /// (the daemon still works fine; the user just won't see the
+    /// indicator until they `open Sift.app` themselves).
+    public static func ensureMenuBarRunning() {
+        _ = try? Subprocess.run(
+            ["/usr/bin/open", "-gb", "eco.datadesk.sift.menubar"]
+        )
+    }
+
     /// Build a session name from the LLM-generated slug. Falls back to a
     /// timestamp only when slug generation fails (and the caller will
     /// pass it through `uniqueName` to avoid colliding with an existing

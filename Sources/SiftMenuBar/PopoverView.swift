@@ -13,14 +13,14 @@ struct PopoverView: View {
                 empty
             } else {
                 if !model.active.isEmpty {
-                    sectionTitle("Running")
+                    sectionTitle("running")
                     ForEach(model.active) { state in
                         ActiveRow(state: state, model: model)
                     }
                 }
                 if !model.states.filter({ $0.status != .running || !RunRegistry.pidAlive($0.pid) }).isEmpty {
                     Divider().padding(.vertical, 4)
-                    sectionTitle("Recent")
+                    sectionTitle("recent")
                     ForEach(model.states.filter { state in
                         state.status != .running || !RunRegistry.pidAlive(state.pid)
                     }.prefix(5)) { state in
@@ -55,7 +55,7 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("no investigations yet")
                 .foregroundStyle(.secondary)
-            Text("Run `sift auto \"…\"` from a terminal to start one.")
+            Text("run `sift auto \"…\"` from a terminal to start one.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -63,7 +63,7 @@ struct PopoverView: View {
     }
 
     private func sectionTitle(_ s: String) -> some View {
-        Text(s.uppercased())
+        Text(s)
             .font(.caption2)
             .foregroundStyle(.secondary)
             .padding(.bottom, 4)
@@ -71,13 +71,13 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Button("Open ~/.sift") {
+            Button("open ~/.sift") {
                 NSWorkspace.shared.open(Paths.siftHome)
             }
             .buttonStyle(.borderless)
             .font(.caption)
             Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+            Button("quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .keyboardShortcut("q")
@@ -116,11 +116,11 @@ private struct ActiveRow: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                Button("Tail") { model.tailLog(state) }
+                Button("tail") { model.tailLog(state) }
                     .buttonStyle(.borderless).font(.caption)
-                Button("Folder") { model.openInFinder(state) }
+                Button("folder") { model.openInFinder(state) }
                     .buttonStyle(.borderless).font(.caption)
-                Button("Stop") { model.stop(state) }
+                Button("stop") { model.stop(state) }
                     .buttonStyle(.borderless).font(.caption)
                     .foregroundStyle(.red)
             }
@@ -157,9 +157,9 @@ private struct RecentRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
-            Button("Report") { model.openReport(state) }
+            Button("report") { model.openReport(state) }
                 .buttonStyle(.borderless).font(.caption)
-            Button("Folder") { model.openInFinder(state) }
+            Button("folder") { model.openInFinder(state) }
                 .buttonStyle(.borderless).font(.caption)
         }
         .padding(.vertical, 4)

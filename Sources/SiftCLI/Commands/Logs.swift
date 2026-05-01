@@ -27,6 +27,8 @@ struct LogsCommand: AsyncParsableCommand {
                     )
                 }
                 state = s
+            } else if let lead = ActiveLead.get(), let s = RunRegistry.read(lead) {
+                state = s
             } else {
                 guard let s = RunRegistry.mostRecent() else {
                     throw SiftError("no sift auto sessions on record")

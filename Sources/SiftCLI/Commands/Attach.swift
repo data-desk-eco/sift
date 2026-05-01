@@ -25,6 +25,11 @@ struct AttachCommand: AsyncParsableCommand {
                 target = s
             } else if let active = RunRegistry.active().first {
                 target = active
+            } else if let lead = ActiveLead.get(), let s = RunRegistry.read(lead) {
+                FileHandle.standardError.write(Data(
+                    "[attach]   no running session — showing active lead (\(s.session))\n".utf8
+                ))
+                target = s
             } else if let recent = RunRegistry.mostRecent() {
                 FileHandle.standardError.write(Data(
                     "[attach]   no running session — showing most recent (\(recent.session))\n".utf8
