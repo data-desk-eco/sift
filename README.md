@@ -10,15 +10,14 @@ The same command surface is shared between humans and agents: `sift search`, `si
 curl -fsSL https://raw.githubusercontent.com/data-desk-eco/sift/main/install.sh | bash
 ```
 
-The installer pulls in runtime dependencies via Homebrew (`node`, `llama.cpp`), the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness via npm, clones the source tree to `~/Library/Application Support/Sift/src`, builds the Swift binary + menu bar app with `swift build -c release`, ad-hoc codesigns them, and drops `sift` in `~/.local/bin/` and `Sift.app` in `/Applications/`. `~/.local/bin` must be on `PATH`.
+The installer pulls in runtime dependencies via Homebrew (`node`, `llama.cpp`), clones the source tree to `~/Library/Application Support/Sift/src`, builds the Swift binary + menu bar app with `swift build -c release`, ad-hoc codesigns them, installs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi) agent harness locally into `~/Library/Application Support/Sift/pi/` (no npm globals are touched), and drops `sift` in `~/.local/bin/` and `Sift.app` in `/Applications/`. `~/.local/bin` must be on `PATH`. To remove everything later: `make uninstall`.
 
 To install manually:
 
 ```bash
 brew install node llama.cpp
-npm install -g @mariozechner/pi
 git clone https://github.com/data-desk-eco/sift && cd sift
-make install
+make install   # builds, ad-hoc signs, and bundles pi into ~/Library/Application Support/Sift/
 ```
 
 ## Quick start

@@ -44,9 +44,13 @@ if (( ${#missing[@]} > 0 )); then
   brew install "${missing[@]}" >/dev/null
 fi
 
-if ! command -v pi >/dev/null 2>&1; then
-  echo "Installing the pi agent harness..."
-  npm install -g --loglevel=error @mariozechner/pi
+# pi is installed locally under Application Support/Sift, not as a
+# global npm package — keeps multiple sift installs independent and
+# makes uninstalling clean. The Makefile's install-pi target does the
+# actual work; we just make sure npm is available before we get there.
+if ! command -v npm >/dev/null 2>&1; then
+  echo "npm should have been installed with node — bailing out." >&2
+  exit 1
 fi
 
 # Where to keep the source tree. Use a stable path so re-runs do an

@@ -10,7 +10,15 @@ struct InitCommand: AsyncParsableCommand {
 
     func run() async throws {
         do {
-            try requireDep("pi", install: "npm install -g @mariozechner/pi")
+            // pi is installed by the sift installer into Application
+            // Support, so the only failure here is "the user ran the CLI
+            // without running the installer".
+            if Paths.findExecutable("pi") == nil {
+                throw SiftError(
+                    "the pi agent harness isn't installed",
+                    suggestion: "re-run the sift installer, or `make install-pi` from a source checkout"
+                )
+            }
             try Paths.ensureSiftHome()
 
             let vault = VaultService()
@@ -76,12 +84,4 @@ struct InitCommand: AsyncParsableCommand {
         }
     }
 
-    private func requireDep(_ name: String, install hint: String) throws {
-        if Subprocess.which(name) == nil {
-            throw SiftError(
-                "missing dependency: \(name)",
-                suggestion: "install: \(hint)"
-            )
-        }
-    }
 }

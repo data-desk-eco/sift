@@ -75,7 +75,7 @@ public enum PiRunner {
         deadline: Deadline?, skillDir: URL
     ) async throws -> Prelaunch {
         try Sift.ensureInitialized()
-        try requireDep("pi", install: "npm install -g @mariozechner/pi")
+        try requirePi()
 
         try Backend.start()
         try Backend.configurePi()
@@ -280,15 +280,24 @@ public enum PiRunner {
         return slug.isEmpty ? ts : "\(ts)-\(slug)"
     }
 
-    private static func requireDep(_ name: String, install hint: String) throws {
-        if Subprocess.which(name) == nil {
-            throw SiftError("missing dependency: \(name)", suggestion: "install: \(hint)")
-        }
+    /// pi is installed by sift's installer into Application Support; the
+    /// CLI also looks on $PATH as a fallback for ad-hoc dev installs.
+    private static func requirePi() throws {
+        if Paths.findExecutable("pi") != nil { return }
+        throw SiftError(
+            "the pi agent harness isn't installed",
+            suggestion: "re-run the sift installer, or `make install-pi` from a source checkout"
+        )
     }
 
     private static func resolveExecutable(_ name: String) throws -> String {
-        guard let path = Subprocess.which(name) else {
-            throw SiftError("missing dependency: \(name)")
+        guard let path = Paths.findExecutable(name) else {
+            throw SiftError(
+                "missing dependency: \(name)",
+                suggestion: name == "pi"
+                    ? "re-run the sift installer to reinstall it"
+                    : "install \(name) and try again"
+            )
         }
         return path
     }

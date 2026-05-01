@@ -13,7 +13,13 @@ BUILD_CONFIG ?= release
 BUILD_DIR := .build/$(BUILD_CONFIG)
 APP_BUNDLE := $(APP_NAME).app
 
-.PHONY: all build cli app bundle codesign install install-cli install-app run clean
+# Sift-owned tooling lives here so we don't pollute npm globals and
+# uninstalling sift cleans up after itself.
+SUPPORT_DIR := $(HOME)/Library/Application Support/Sift
+PI_DIR := $(SUPPORT_DIR)/pi
+PI_PACKAGE := @mariozechner/pi
+
+.PHONY: all build cli app bundle codesign install install-cli install-app install-pi uninstall run clean
 
 all: build
 
@@ -44,8 +50,25 @@ codesign: bundle
 		|| codesign --force --deep --sign - $(APP_BUNDLE)
 	@echo "signed   -> $(APP_BUNDLE) (ad-hoc)"
 
-install: install-cli install-app
+install: install-cli install-app install-pi
 	@echo "done. add $(BINDIR) to PATH if it isn't already."
+
+install-pi:
+	@command -v npm >/dev/null 2>&1 || { \
+		echo "npm not found — install Node first ('brew install node')." >&2; \
+		exit 1; \
+	}
+	@mkdir -p "$(PI_DIR)"
+	@echo "pi       -> installing $(PI_PACKAGE) into $(PI_DIR)"
+	@cd "$(PI_DIR)" && npm install --silent --no-audit --no-fund \
+		--prefix "$(PI_DIR)" $(PI_PACKAGE)
+	@echo "pi       -> $(PI_DIR)/node_modules/.bin/pi"
+
+uninstall:
+	@rm -f $(BINDIR)/sift
+	@rm -rf $(APPDIR)/$(APP_BUNDLE)
+	@rm -rf "$(SUPPORT_DIR)"
+	@echo "uninstalled. ~/.sift (vault, models, sessions) is untouched — remove it manually if you're done with sift."
 
 install-cli: cli
 	@mkdir -p $(BINDIR)
