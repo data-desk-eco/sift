@@ -7,15 +7,6 @@ struct SiftRoot: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "sift",
         abstract: "Investigate subjects in Aleph or OpenAleph from your Mac.",
-        discussion: """
-            All state lives under ~/.sift (vault, models, pi config, run state).
-            Secrets live in the macOS Keychain. Vault unlock is gated by Touch ID.
-
-            The Aleph and cache groups are the same surface the agent uses
-            during `sift auto` runs — they're listed first because you'll
-            reach for them most. The setup, auto and report groups below
-            are for managing your own work.
-            """,
         version: Sift.version,
         subcommands: [DaemonRunCommand.self],
         groupedSubcommands: [
