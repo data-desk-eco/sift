@@ -13,56 +13,6 @@ private func notImplemented(_ name: String) throws -> Never {
     )))
 }
 
-// MARK: - auto / status / logs / attach / stop (task #8)
-
-struct AutoCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "auto",
-        abstract: "Run the agent. Detaches; check progress with `sift status` or the menu bar.",
-        discussion: "With PROMPT, launches a headless one-shot daemon and returns to the shell. "
-            + "Without PROMPT, drops into an interactive REPL (foreground)."
-    )
-    @Argument(parsing: .captureForPassthrough) var prompt: [String] = []
-    @Flag(name: .customLong("debug")) var debug: Bool = false
-    @Option(name: [.short, .customLong("time-limit")],
-            help: "soft deadline (e.g. 30m, 1h30m, 90s)")
-    var timeLimit: String?
-    @Flag(name: [.short, .customLong("new")],
-          help: "start a fresh session instead of continuing the most recent one")
-    var new: Bool = false
-
-    func run() async throws { try notImplemented("auto") }
-}
-
-struct StatusCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "status", abstract: "Show running auto-session(s)."
-    )
-    func run() async throws { try notImplemented("status") }
-}
-
-struct LogsCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "logs", abstract: "Tail the most recent auto-session log."
-    )
-    @Flag(name: [.short, .customLong("follow")]) var follow: Bool = false
-    func run() async throws { try notImplemented("logs") }
-}
-
-struct AttachCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "attach", abstract: "Re-attach to a running auto-session in the terminal."
-    )
-    func run() async throws { try notImplemented("attach") }
-}
-
-struct StopCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "stop", abstract: "Stop the running auto-session."
-    )
-    func run() async throws { try notImplemented("stop") }
-}
-
 // MARK: - Research tools
 
 struct SearchCommand: AsyncParsableCommand {

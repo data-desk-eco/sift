@@ -1,0 +1,60 @@
+import ArgumentParser
+import Darwin
+import Foundation
+import SiftCore
+
+struct StopCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "stop",
+        abstract: "Stop the running auto-session."
+    )
+
+    @Argument(help: "session name (defaults to the running one)")
+    var session: String?
+
+    func run() async throws {
+        do {
+            let target: RunState
+            if let name = session {
+                guard let s = RunRegistry.read(name) else {
+                    throw SiftError("no such session: \(name)")
+                }
+                target = s
+            } else {
+                let active = RunRegistry.active()
+                if active.count == 0 {
+                    throw SiftError("no running sift auto session")
+                }
+                if active.count > 1 {
+                    let names = active.map { $0.session }.joined(separator: ", ")
+                    throw SiftError(
+                        "multiple running sessions",
+                        suggestion: "specify one: \(names)"
+                    )
+                }
+                target = active[0]
+            }
+
+            if !RunRegistry.pidAlive(target.pid) {
+                FileHandle.standardError.write(Data(
+                    "[stop]     pid \(target.pid) already gone — marking stopped\n".utf8
+                ))
+            } else {
+                let rc = kill(target.pid, SIGTERM)
+                if rc != 0 {
+                    let err = String(cString: strerror(errno))
+                    throw SiftError("kill \(target.pid) failed: \(err)")
+                }
+                FileHandle.standardError.write(Data(
+                    "[stop]     SIGTERM → \(target.pid)\n".utf8
+                ))
+            }
+            try? RunRegistry.update(target.session) { st in
+                st.status = .stopped
+                st.finishedAt = Int(Date().timeIntervalSince1970)
+            }
+        } catch {
+            throw ExitCode(reportSiftError(error))
+        }
+    }
+}

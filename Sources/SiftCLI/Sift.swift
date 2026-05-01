@@ -36,6 +36,7 @@ struct SiftRoot: AsyncParsableCommand {
             SQLCommand.self,
             CacheCommand.self,
             ExportCommand.self,
+            DaemonRunCommand.self,
         ]
     )
 
