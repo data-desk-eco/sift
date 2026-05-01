@@ -108,7 +108,12 @@ public enum PiRunner {
         env["VAULT_MOUNT"] = mp.path
         env["ALEPH_SESSION_DIR"] = researchDir.path
         env["ALEPH_SESSION"] = sessionDir.lastPathComponent
-        env["ALEPH_DB_PATH"] = sessionDir.appending(path: "aleph.sqlite").path
+        // ALEPH_DB_PATH is intentionally NOT set: Session.dbPath() then
+        // resolves it to <vault>/research/aleph.sqlite, which is shared
+        // across every session on this vault. That's what makes alias
+        // refs stable across investigations (`r5` resolves to the same
+        // entity in every session) and avoids re-paying the API cost
+        // for entities a previous session already cached.
         env["SIFT_FINDINGS_DB"] = sessionDir.appending(path: "findings.db").path
         if let url = Keychain.get(Keychain.Key.alephURL)    { env["ALEPH_URL"]     = url }
         if let key = Keychain.get(Keychain.Key.alephAPIKey) { env["ALEPH_API_KEY"] = key }

@@ -13,7 +13,6 @@ When the vault is unlocked it mounts at `$VAULT_MOUNT` (printed by `sift vault s
 
 ```
 $VAULT_MOUNT/
-  secrets.json            # ALEPH_URL, ALEPH_API_KEY, … (mode 0600)
   research/               # $ALEPH_SESSION_DIR — research products
     aleph.sqlite          # SHARED across sessions: aliases, entity cache,
                           # response cache. Same alias resolves to the same
@@ -22,9 +21,12 @@ $VAULT_MOUNT/
       report.md           # whatever you write — exports, timelines, etc.
       findings.db         # $SIFT_FINDINGS_DB — your structured extractions
                           # (per-session SQLite, never shared across sessions)
+      auto.log            # filtered live log of the agent run
+      pi.stderr.log       # raw pi process stderr
+      .pi-sessions/       # pi's own conversation state
 ```
 
-`sift` auto-discovers credentials from a mounted vault when run from this directory, so you do not need to export `ALEPH_URL` / `ALEPH_API_KEY` yourself.
+API keys live in the macOS Keychain, not on disk. `sift auto` injects `ALEPH_URL` and `ALEPH_API_KEY` into your environment automatically, so you do not need to export them yourself.
 
 ## Aliases
 

@@ -71,7 +71,7 @@ State lives under `~/.sift/`:
 - `.vault.sparseimage` — encrypted volume holding the per-session research dirs (each with `report.md`, `aleph.sqlite`, `auto.log`, `pi-sessions/`)
 - `backend.json` (mode 0600) — backend kind, model, port, base URL (no secrets)
 - `models/` — GGUF model files for the local backend
-- `pi/` — configuration for the agent harness
+- `pi/` — `models.json` and `settings.json` written by sift each run so pi talks to the configured backend (the pi *binary* itself lives separately, in `~/Library/Application Support/Sift/pi/`)
 - `run/<session>.json` — live state per detached `sift auto` run; the menu bar app watches this directory
 - `project.md` — optional one-line project description prepended to the agent's system prompt
 
