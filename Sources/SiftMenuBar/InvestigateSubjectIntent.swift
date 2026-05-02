@@ -26,10 +26,15 @@ struct InvestigateSubjectIntent: AppIntent {
                default: "")
     var timeLimit: String
 
-    @Parameter(title: "New session",
-               description: "Force a fresh session instead of continuing the most recent one.",
+    @Parameter(title: "New lead",
+               description: "Force a fresh lead instead of continuing the most recent one.",
                default: false)
     var newSession: Bool
+
+    @Parameter(title: "Lead slug",
+               description: "Optional name for a fresh lead (kebab-case, letters/digits/-/_/.). Leave blank to use a default derived from the subject.",
+               default: "")
+    var slug: String
 
     static var openAppWhenRun: Bool { false }
 
@@ -45,6 +50,10 @@ struct InvestigateSubjectIntent: AppIntent {
         let trimmedDeadline = timeLimit.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDeadline.isEmpty {
             args.append(contentsOf: ["-t", trimmedDeadline])
+        }
+        let trimmedSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSlug.isEmpty {
+            args.append(contentsOf: ["--slug", trimmedSlug])
         }
         args.append(trimmedSubject)
 

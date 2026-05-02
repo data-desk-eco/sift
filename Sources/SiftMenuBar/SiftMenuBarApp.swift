@@ -15,13 +15,30 @@ struct SiftMenuBarApp: App {
         MenuBarExtra {
             PopoverView(model: model)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: model.indicatorSymbol)
-                if let scope = model.activeScope {
-                    Text(scope).font(.system(size: 11)).monospaced()
-                }
-            }
+            IndicatorDot(state: model.indicator)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Status circle in the menu bar. Filled in colour when something is
+/// running or the last run failed; hollow stroke when idle. No text —
+/// `sift status` / the popover carry the detail.
+private struct IndicatorDot: View {
+    let state: RunStateModel.Indicator
+
+    var body: some View {
+        switch state {
+        case .running:
+            Circle().fill(.blue).frame(width: 10, height: 10)
+        case .failed:
+            Circle().fill(.red).frame(width: 10, height: 10)
+        case .stopped:
+            Circle().fill(.orange).frame(width: 10, height: 10)
+        case .idle:
+            Circle()
+                .strokeBorder(.secondary, lineWidth: 1.25)
+                .frame(width: 10, height: 10)
+        }
     }
 }

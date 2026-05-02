@@ -23,20 +23,14 @@ struct VaultInit: SiftSubcommand {
 
     func execute() async throws {
         let vault = VaultService()
-        _ = try vault.initialize(size: size)
+        let passphrase = try promptNewVaultPassphrase()
+        _ = try vault.initialize(passphrase: passphrase, size: size)
         print("✔ vault initialised")
         print("  sparseimage : \(vault.sparseimagePath.path)")
         print("  mounted at  : \(vault.defaultMountpoint.path)")
         print("")
-        print("The passphrase is stored in your macOS login keychain")
-        print("(service \"\(Keychain.service)\", account \"\(Keychain.Key.vaultPassphrase)\")")
-        print("with a Touch-ID / login-password ACL. It is device-only —")
-        print("it does NOT sync to iCloud — so if you ever lose this Mac")
-        print("the sparseimage above can't be decrypted.")
-        print("")
-        print("To back it up: open Keychain Access.app, search for")
-        print("\"\(Keychain.service)\", and copy the password into")
-        print("your password manager. (Touch ID will gate the reveal.)")
+        print("Save the passphrase in your password manager — sift never")
+        print("stores it. Lose it and the vault is unrecoverable.")
         print("")
         print("Add your Aleph credentials next:")
         print("  sift vault set ALEPH_URL https://aleph.occrp.org")
@@ -46,10 +40,10 @@ struct VaultInit: SiftSubcommand {
 
 struct VaultUnlock: SiftSubcommand {
     static let configuration = CommandConfiguration(
-        commandName: "unlock", abstract: "Mount the vault (Touch ID gated)."
+        commandName: "unlock", abstract: "Mount the vault (passphrase prompt)."
     )
     func execute() async throws {
-        let mp = try VaultService().unlock()
+        let mp = try requireVault()
         print(mp.path)
     }
 }
@@ -84,11 +78,10 @@ struct VaultStatus: SiftSubcommand {
     }
 }
 
-/// Sift's vault holds non-secret config (Aleph URL, optional alt
-/// servers) on the encrypted volume; actual secrets (API keys,
-/// passphrase) live in Keychain. Two known keys map to Keychain
-/// entries; everything else lands in `<mount>/config.json` for the
-/// research session to read.
+/// Sift's vault holds Aleph + hosted-backend creds in
+/// `<mount>/secrets.json`. Two known keys map to the Aleph slot;
+/// extending the surface to other keys means rejecting them here so a
+/// typo doesn't silently land in the JSON file.
 struct VaultSet: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "set", abstract: "Store a credential or config value."
@@ -97,13 +90,13 @@ struct VaultSet: SiftSubcommand {
     @Argument var value: String
 
     func execute() async throws {
+        _ = try requireVault()
         switch key {
         case "ALEPH_URL":
-            Keychain.set(Keychain.Key.alephURL, value)
+            try SecretsStore.update { $0.alephURL = value }
         case "ALEPH_API_KEY":
-            Keychain.set(Keychain.Key.alephAPIKey, value)
+            try SecretsStore.update { $0.alephAPIKey = value }
         default:
-            _ = try VaultService().requireMounted()
             throw SiftError(
                 "unknown key '\(key)'",
                 suggestion: "known: ALEPH_URL, ALEPH_API_KEY"
@@ -120,39 +113,36 @@ struct VaultGet: SiftSubcommand {
     @Argument var key: String
 
     func execute() async throws {
+        _ = try requireVault()
+        let secrets = try SecretsStore.load()
         let value: String?
         switch key {
-        case "ALEPH_URL":     value = Keychain.get(Keychain.Key.alephURL)
-        case "ALEPH_API_KEY": value = Keychain.get(Keychain.Key.alephAPIKey)
+        case "ALEPH_URL":     value = secrets.alephURL
+        case "ALEPH_API_KEY": value = secrets.alephAPIKey
         default:
             throw SiftError(
                 "unknown key '\(key)'",
                 suggestion: "known: ALEPH_URL, ALEPH_API_KEY"
             )
         }
-        guard let v = value else {
+        guard let v = value, !v.isEmpty else {
             throw SiftError("no value stored for '\(key)'")
         }
         print(v)
     }
 }
 
-struct VaultList: AsyncParsableCommand {
+struct VaultList: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "list", abstract: "List stored credential keys (values not shown)."
     )
-    func run() async throws {
-        let stored = Keychain.keys()
-            .filter { $0.hasPrefix("aleph.") || $0 == Keychain.Key.vaultPassphrase }
-        let display = stored.compactMap { key -> String? in
-            switch key {
-            case Keychain.Key.alephURL: return "ALEPH_URL"
-            case Keychain.Key.alephAPIKey: return "ALEPH_API_KEY"
-            case Keychain.Key.vaultPassphrase: return nil
-            default: return key
-            }
-        }
-        print(display.isEmpty ? "(empty)" : display.joined(separator: "\n"))
+    func execute() async throws {
+        _ = try requireVault()
+        let secrets = try SecretsStore.load()
+        var keys: [String] = []
+        if let v = secrets.alephURL,    !v.isEmpty { keys.append("ALEPH_URL") }
+        if let v = secrets.alephAPIKey, !v.isEmpty { keys.append("ALEPH_API_KEY") }
+        print(keys.isEmpty ? "(empty)" : keys.joined(separator: "\n"))
     }
 }
 
@@ -162,15 +152,16 @@ struct VaultEnv: SiftSubcommand {
         abstract: "Print export statements for vault env (eval-friendly)."
     )
     func execute() async throws {
-        let mp = try VaultService().requireMounted()
+        let mp = try requireVault()
+        let secrets = (try? SecretsStore.load()) ?? VaultSecrets()
         var env: [(String, String)] = [
             ("VAULT_MOUNT", mp.path),
             ("ALEPH_SESSION_DIR", mp.appending(path: "research").path),
         ]
-        if let url = Keychain.get(Keychain.Key.alephURL) {
+        if let url = secrets.alephURL, !url.isEmpty {
             env.append(("ALEPH_URL", url))
         }
-        if let key = Keychain.get(Keychain.Key.alephAPIKey) {
+        if let key = secrets.alephAPIKey, !key.isEmpty {
             env.append(("ALEPH_API_KEY", key))
         }
         for (k, v) in env {

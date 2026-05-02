@@ -6,11 +6,11 @@ import SiftCore
 struct LogsCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "logs",
-        abstract: "Tail the most recent auto-session log."
+        abstract: "Tail the active lead's log (or the named lead's)."
     )
 
-    @Argument(help: "session name (defaults to the most recent one)")
-    var session: String?
+    @Argument(help: "lead name (defaults to the active lead, then most recent)")
+    var lead: String?
 
     @Flag(name: [.short, .customLong("follow")],
           help: "follow the log as it grows (Ctrl-C to stop)")
@@ -18,19 +18,19 @@ struct LogsCommand: SiftSubcommand {
 
     func execute() async throws {
         let state: RunState
-        if let name = session {
+        if let name = lead {
             guard let s = RunRegistry.read(name) else {
                 throw SiftError(
-                    "no such session: \(name)",
+                    "no such lead: \(name)",
                     suggestion: "run 'sift status -a' to list them"
                 )
             }
             state = s
-        } else if let lead = ActiveLead.get(), let s = RunRegistry.read(lead) {
+        } else if let active = ActiveLead.get(), let s = RunRegistry.read(active) {
             state = s
         } else {
             guard let s = RunRegistry.mostRecent() else {
-                throw SiftError("no sift auto sessions on record")
+                throw SiftError("no leads on record")
             }
             state = s
         }

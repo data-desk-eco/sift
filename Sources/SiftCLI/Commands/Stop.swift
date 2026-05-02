@@ -6,17 +6,17 @@ import SiftCore
 struct StopCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "stop",
-        abstract: "Stop the running auto-session."
+        abstract: "Stop the running lead's agent."
     )
 
-    @Argument(help: "session name (defaults to the running one)")
-    var session: String?
+    @Argument(help: "lead name (defaults to the running one)")
+    var lead: String?
 
     func execute() async throws {
         let target: RunState
-        if let name = session {
+        if let name = lead {
             guard let s = RunRegistry.read(name) else {
-                throw SiftError("no such session: \(name)")
+                throw SiftError("no such lead: \(name)")
             }
             target = s
         } else {
@@ -26,18 +26,18 @@ struct StopCommand: SiftSubcommand {
             } else if active.count > 1 {
                 // Prefer the active lead when several runs are live;
                 // fall back to demanding an explicit name otherwise.
-                if let lead = ActiveLead.get(),
-                   let s = active.first(where: { $0.session == lead }) {
+                if let pinned = ActiveLead.get(),
+                   let s = active.first(where: { $0.session == pinned }) {
                     target = s
                 } else {
                     let names = active.map { $0.session }.joined(separator: ", ")
                     throw SiftError(
-                        "multiple running sessions",
+                        "multiple running leads",
                         suggestion: "specify one: \(names)"
                     )
                 }
             } else {
-                throw SiftError("no running sift auto session")
+                throw SiftError("no running lead")
             }
         }
 

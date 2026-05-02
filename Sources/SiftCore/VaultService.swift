@@ -1,11 +1,15 @@
 import CommonCrypto
 import Foundation
 
-/// Encrypted vault backed by an APFS sparseimage on macOS, gated by Touch ID.
+/// Encrypted vault backed by an APFS sparseimage on macOS.
 ///
-/// One vault per `siftHome` (default `~/.sift`). The passphrase lives in the
-/// login keychain — there's no on-disk passphrase file, so a stolen home
-/// directory yields nothing.
+/// One vault per `siftHome` (default `~/.sift`). The user picks the
+/// passphrase at `sift init` time and is responsible for storing it (a
+/// password manager is fine). sift never persists it: every CLI
+/// invocation that needs to mount the vault prompts for it, then drops
+/// it on exit. After a successful unlock, subsequent invocations reuse
+/// the existing mountpoint and don't prompt again until the user runs
+/// `sift vault lock` or reboots.
 public final class VaultService: @unchecked Sendable {
     public static let defaultSize = "20g"
     public static let filename = ".vault.sparseimage"
@@ -31,22 +35,23 @@ public final class VaultService: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    /// Create the sparseimage, mount it, and stash the passphrase in
-    /// Keychain. Returns the mountpoint. Throws if a vault already
-    /// exists. The passphrase is intentionally NOT returned: callers
-    /// don't need it (Keychain holds it for unlocks), and not handing
-    /// it back means it can't be accidentally logged or printed.
+    /// Create the sparseimage with `passphrase` and mount it. Returns the
+    /// mountpoint. Throws if a vault already exists. The caller is
+    /// responsible for prompting the user for `passphrase` (twice, with
+    /// confirmation) — `sift init` does this.
     @discardableResult
-    public func initialize(size: String = defaultSize) throws -> URL {
+    public func initialize(passphrase: String, size: String = defaultSize) throws -> URL {
         if isCreated {
             throw SiftError(
                 "vault already exists at \(sparseimagePath.path)",
-                suggestion: "use 'sift vault unlock' to mount"
+                suggestion: "delete it (`rm \(sparseimagePath.path)`) and re-run 'sift init' if you've forgotten the passphrase — there is NO recovery"
             )
+        }
+        guard !passphrase.isEmpty else {
+            throw SiftError("vault passphrase must not be empty")
         }
         try Paths.ensure(projectDir)
 
-        let passphrase = try Self.randomPassphrase()
         let stem = sparseimagePath.deletingPathExtension().path
 
         try Subprocess.check(
@@ -57,7 +62,6 @@ public final class VaultService: @unchecked Sendable {
              "-stdinpass", stem],
             input: passphrase
         )
-        Keychain.set(Keychain.Key.vaultPassphrase, passphrase)
 
         try Subprocess.check(
             ["/usr/bin/hdiutil", "attach", "-stdinpass",
@@ -68,30 +72,34 @@ public final class VaultService: @unchecked Sendable {
         return defaultMountpoint
     }
 
-    /// Mount the vault if not already mounted. Touch-ID gated.
+    /// Mount the vault if not already mounted. The caller supplies the
+    /// `passphrase` — typically by prompting the user via `getpass`.
+    /// `reason` is unused (kept for call-site readability).
     @discardableResult
-    public func unlock(reason: String = "Unlock the sift vault") throws -> URL {
+    public func unlock(passphrase: String, reason: String = "Unlock the sift vault") throws -> URL {
         if let existing = findExistingMount() { return existing }
         guard isCreated else {
             throw SiftError(
                 "vault not initialised",
-                suggestion: "run 'sift vault init' first"
+                suggestion: "run 'sift init' first"
             )
         }
-        guard TouchID.confirm(reason: reason) else {
-            throw SiftError("Touch ID cancelled or failed")
+        guard !passphrase.isEmpty else {
+            throw SiftError("vault passphrase must not be empty")
         }
-        guard let passphrase = Keychain.get(Keychain.Key.vaultPassphrase) else {
-            throw SiftError(
-                "vault passphrase missing from Keychain",
-                suggestion: "destroy and recreate: 'rm \(sparseimagePath.path) && sift vault init'"
+        do {
+            try Subprocess.check(
+                ["/usr/bin/hdiutil", "attach", "-stdinpass",
+                 "-mountpoint", defaultMountpoint.path, sparseimagePath.path],
+                input: passphrase
             )
+        } catch {
+            // Two CLIs racing to unlock can both call hdiutil attach;
+            // the second errors with "resource busy". If a mountpoint
+            // appeared in the meantime, that's a win — return it.
+            if let existing = findExistingMount() { return existing }
+            throw error
         }
-        try Subprocess.check(
-            ["/usr/bin/hdiutil", "attach", "-stdinpass",
-             "-mountpoint", defaultMountpoint.path, sparseimagePath.path],
-            input: passphrase
-        )
         return defaultMountpoint
     }
 
@@ -139,13 +147,5 @@ public final class VaultService: @unchecked Sendable {
         let dir = mp.appending(path: "research")
         try Paths.ensure(dir)
         return dir
-    }
-
-    static func randomPassphrase() throws -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            throw SiftError("system RNG failed; refusing to create vault with weak passphrase")
-        }
-        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 }

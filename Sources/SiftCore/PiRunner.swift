@@ -25,9 +25,10 @@ public enum PiRunner {
         public var piSessionDir: URL
     }
 
-    /// Decide what session to resume / create. Synchronous for the easy
-    /// cases. The caller (CLI auto command) is responsible for calling
-    /// `AISlug.make()` when it needs a fresh slugged session.
+    /// Decide what session to resume / create. The caller (CLI auto
+    /// command) is responsible for prompting the user for a fresh slug
+    /// — we just take whatever it hands back via `freshSlug` and apply
+    /// `uniqueName` to avoid colliding with an existing directory.
     public struct SessionResolution: Sendable {
         public var sessionDir: URL
         public var resuming: Bool
@@ -92,7 +93,11 @@ public enum PiRunner {
         let promptPath = try SystemPrompt.build(deadlineNote: dlNote)
 
         let vault = VaultService()
-        let mp = try (vault.findExistingMount() ?? vault.unlock())
+        // Caller (sift auto / sift _daemon) is responsible for unlocking
+        // the vault before we get here. The daemon never has a TTY and
+        // can't prompt; the parent CLI unlocks via passphrase prompt then
+        // re-execs into the daemon, which inherits the system mount.
+        let mp = try vault.requireMounted()
         let researchDir = mp.appending(path: "research")
         try Paths.ensure(researchDir)
         try Paths.ensure(sessionDir)
@@ -122,8 +127,12 @@ public enum PiRunner {
         // entity in every session) and avoids re-paying the API cost
         // for entities a previous session already cached.
         env["SIFT_FINDINGS_DB"] = sessionDir.appending(path: "findings.db").path
-        if let url = Keychain.get(Keychain.Key.alephURL)    { env["ALEPH_URL"]     = url }
-        if let key = Keychain.get(Keychain.Key.alephAPIKey) { env["ALEPH_API_KEY"] = key }
+        let secrets = (try? SecretsStore.load(vault: vault)) ?? VaultSecrets()
+        if let url = secrets.alephURL, !url.isEmpty { env["ALEPH_URL"] = url }
+        if let key = secrets.alephAPIKey, !key.isEmpty { env["ALEPH_API_KEY"] = key }
+        // Strip the passphrase env var before spawning pi — it should
+        // never propagate beyond the CLI process that read it.
+        env.removeValue(forKey: "SIFT_VAULT_PASSPHRASE")
         if let dl = deadline {
             env["SIFT_DEADLINE_TS"] = String(dl.endTimestamp)
             env["SIFT_DEADLINE_START_TS"] = String(dl.startTimestamp)
@@ -313,27 +322,34 @@ public enum PiRunner {
 
     /// Bring up the bundled menu bar app so a freshly spawned daemon
     /// gets a live status indicator without the user having to click
-    /// anything. `open -gb` is idempotent — a no-op if the app is
-    /// already running, and silently fails if Sift.app isn't installed
-    /// (the daemon still works fine; the user just won't see the
-    /// indicator until they `open Sift.app` themselves).
+    /// anything. Prefers `open -ga <path>` over `-gb <bundle-id>` —
+    /// path-based open works even when Launch Services hasn't indexed
+    /// the freshly-installed bundle yet, which bites every `make install`
+    /// → immediate `sift auto` cycle. Idempotent (no-op when the app is
+    /// already running). Silently does nothing if Sift.app isn't on
+    /// disk; the daemon still runs, the user just won't get the
+    /// indicator until they open Sift.app themselves.
     public static func ensureMenuBarRunning() {
+        let fm = FileManager.default
+        let candidates: [URL] = [
+            // CLI inside Sift.app (cask install): walk up to the .app.
+            Paths.bundledAppRoot(),
+            URL(filePath: "/Applications/Sift.app"),
+            URL(filePath: "\(NSHomeDirectory())/Applications/Sift.app"),
+        ].compactMap { $0 }
+        if let app = candidates.first(where: { fm.fileExists(atPath: $0.path) }) {
+            _ = try? Subprocess.run(["/usr/bin/open", "-ga", app.path])
+            return
+        }
+        // No path found — last-ditch ask Launch Services by bundle ID.
         _ = try? Subprocess.run(
             ["/usr/bin/open", "-gb", "eco.datadesk.sift.menubar"]
         )
     }
 
-    /// Build a session name from the LLM-generated slug. Falls back to a
-    /// timestamp only when slug generation fails (and the caller will
-    /// pass it through `uniqueName` to avoid colliding with an existing
-    /// directory).
-    public static func newSessionName(prompt: String, researchDir: URL) async -> String {
-        let slug = await AISlug.make(prompt: prompt)
-        let base = slug.isEmpty ? fallbackTimestamp() : slug
-        return uniqueName(researchDir: researchDir, base: base)
-    }
-
-    static func fallbackTimestamp() -> String {
+    /// Timestamp-shaped fallback when no usable slug can be derived
+    /// from the user's prompt and they don't supply one interactively.
+    public static func fallbackTimestamp() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -343,7 +359,7 @@ public enum PiRunner {
     /// Append `-2`, `-3`, … if `<researchDir>/<base>` is already taken.
     /// Slugs aren't guaranteed unique across investigations of the same
     /// subject; collisions are rare but real.
-    static func uniqueName(researchDir: URL, base: String) -> String {
+    public static func uniqueName(researchDir: URL, base: String) -> String {
         let fm = FileManager.default
         if !fm.fileExists(atPath: researchDir.appending(path: base).path) {
             return base

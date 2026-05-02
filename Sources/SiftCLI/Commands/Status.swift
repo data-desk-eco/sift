@@ -5,11 +5,11 @@ import SiftCore
 struct StatusCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
-        abstract: "Show running and recently-finished auto-sessions."
+        abstract: "Show running and recently-finished leads."
     )
 
     @Flag(name: [.short, .customLong("all")],
-          help: "include every session on record, not just the most recent finishes")
+          help: "include every lead on record, not just the most recent finishes")
     var all: Bool = false
 
     private static let recentLimit = 10
@@ -17,7 +17,7 @@ struct StatusCommand: AsyncParsableCommand {
     func run() async throws {
         let states = RunRegistry.list()
         if states.isEmpty {
-            print("(no sift auto sessions on record)")
+            print("(no leads on record)")
             return
         }
 
@@ -54,7 +54,7 @@ struct StatusCommand: AsyncParsableCommand {
                 Render.short(lastEvent, width: 60),
             ])
         }
-        print(Table.render(rows, headers: [" ", "session", "status", "age", "pid", "last"]))
+        print(Table.render(rows, headers: [" ", "lead", "status", "age", "pid", "last"]))
     }
 
     /// All currently-running sessions, plus up to `limit` most recent

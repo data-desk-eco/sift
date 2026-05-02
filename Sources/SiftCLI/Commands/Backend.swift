@@ -21,7 +21,7 @@ struct BackendShow: SiftSubcommand {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
         print(String(data: data, encoding: .utf8) ?? "")
-        // Note: hosted API key is not printed — it's in Keychain.
+        // Note: hosted API key is not printed — it's in <vault>/secrets.json.
     }
 }
 
@@ -44,6 +44,10 @@ struct BackendHosted: SiftSubcommand {
         abstract: "Switch to a hosted OpenAI-compatible endpoint."
     )
     func execute() async throws {
+        // We're about to write hosted creds into the vault — make sure
+        // it's mounted before the user types a long API key only to hit
+        // a "vault is not mounted" error.
+        _ = try requireVault()
         let baseURL = promptUser("OpenAI-compatible base URL (e.g. https://api.openai.com/v1):")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !baseURL.isEmpty else {

@@ -30,16 +30,29 @@ final class RunStateModel {
         states.filter { $0.status == .running && RunRegistry.pidAlive($0.pid) }
     }
 
-    /// Symbol shown in the menu bar.
-    var indicatorSymbol: String {
-        if active.isEmpty { return "magnifyingglass" }
-        return "magnifyingglass.circle.fill"
+    /// Coarse-grained state for the menu bar dot. Drives a fill colour
+    /// rather than a symbol — the bar shouldn't shout at the user, it
+    /// should give them an at-a-glance read of "anything running?" and
+    /// "did the last thing blow up?".
+    enum Indicator {
+        case idle      // no runs, or last terminal finished cleanly
+        case running   // at least one live agent
+        case stopped   // most recent terminal was user-stopped
+        case failed    // most recent terminal was an error exit
     }
 
-    /// First active session's current scope (e.g. "tool", "agent"),
-    /// rendered next to the icon.
-    var activeScope: String? {
-        active.first?.lastScope.isEmpty == false ? active.first?.lastScope : nil
+    var indicator: Indicator {
+        if !active.isEmpty { return .running }
+        // Find the most recent terminal run (sorted desc by startedAt).
+        for state in states where state.status != .running {
+            switch state.status {
+            case .failed:   return .failed
+            case .stopped:  return .stopped
+            case .finished: return .idle
+            case .running:  continue
+            }
+        }
+        return .idle
     }
 
     // MARK: - Reload

@@ -24,24 +24,37 @@ struct InitCommand: SiftSubcommand {
         let firstRun = !vault.isCreated
         if firstRun {
             Log.say("init", "creating encrypted vault at \(vault.sparseimagePath.path)")
-            _ = try vault.initialize()
-            Log.say("init", "passphrase stored in Keychain (\(Keychain.service)) — back it up via Keychain Access.app if you want a recovery copy off this Mac")
+            let passphrase = try promptNewVaultPassphrase()
+            _ = try vault.initialize(passphrase: passphrase)
+            Log.say("init", "vault created — store this passphrase in your password manager; sift cannot recover it for you")
         } else {
             Log.say("init", "vault already exists")
-            _ = try vault.unlock()
+            _ = try requireVault(reason: "Unlock the existing vault to continue setup")
         }
 
-        Log.say("init", "configuring Aleph credentials")
-        let url = promptUser("Aleph URL [https://aleph.occrp.org]:")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let alephURL = url.isEmpty ? "https://aleph.occrp.org" : url
-        let alephKey = promptUser("Aleph API key:", secret: true)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !alephKey.isEmpty else {
-            throw SiftError("Aleph API key required")
+        // Skip the Aleph creds prompt on re-init when both are already
+        // in the vault. The user can change either with
+        // `sift vault set ALEPH_URL ...` / `sift vault set ALEPH_API_KEY ...`.
+        let existing = (try? SecretsStore.load()) ?? VaultSecrets()
+        let hasAleph = !(existing.alephURL ?? "").isEmpty
+            && !(existing.alephAPIKey ?? "").isEmpty
+        if hasAleph {
+            Log.say("init", "Aleph credentials already stored in the vault (use 'sift vault set' to change)")
+        } else {
+            Log.say("init", "configuring Aleph credentials")
+            let url = promptUser("Aleph URL [https://aleph.occrp.org]:")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let alephURL = url.isEmpty ? "https://aleph.occrp.org" : url
+            let alephKey = promptUser("Aleph API key:", secret: true)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !alephKey.isEmpty else {
+                throw SiftError("Aleph API key required")
+            }
+            try SecretsStore.update { s in
+                s.alephURL = alephURL
+                s.alephAPIKey = alephKey
+            }
         }
-        Keychain.set(Keychain.Key.alephURL, alephURL)
-        Keychain.set(Keychain.Key.alephAPIKey, alephKey)
 
         if Backend.readConfig() != nil {
             Log.say("init", "backend already configured (use 'sift backend' to change)")
@@ -62,7 +75,7 @@ struct InitCommand: SiftSubcommand {
         }
 
         try Sift.markInitialized()
-        print("[init]     done — try: sift auto \"investigate <subject>\"")
+        print("[init]     done — try: sift auto \"investigate <subject>\" (you'll be asked for a slug)")
     }
 
     private func chooseBackendInteractive() async throws {

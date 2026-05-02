@@ -93,7 +93,7 @@ public enum Backend {
                 throw SiftError("hosted backend missing base URL")
             }
             baseURL = url
-            apiKey = Keychain.get(Keychain.Key.hostedAPIKey) ?? ""
+            apiKey = (try? SecretsStore.load().hostedAPIKey) ?? ""
             display = config.modelName
         }
         try Paths.ensure(Paths.piConfigDir)
@@ -311,7 +311,11 @@ public enum Backend {
         baseURL: String, apiKey: String, modelName: String
     ) throws {
         try writeConfig(.makeHosted(baseURL: baseURL, modelName: modelName))
-        Keychain.set(Keychain.Key.hostedAPIKey, apiKey)
+        try SecretsStore.update { secrets in
+            secrets.hostedBaseURL = baseURL
+            secrets.hostedAPIKey = apiKey
+            secrets.hostedModelName = modelName
+        }
     }
 
     // MARK: - Internal

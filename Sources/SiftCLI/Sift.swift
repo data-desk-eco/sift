@@ -23,11 +23,13 @@ struct SiftRoot: AsyncParsableCommand {
                 NeighborsCommand.self,
             ]),
             // The agent's self-knowledge tools: what's already in the
-            // local cache, and how much time is left on the clock.
+            // local cache, prior leads' findings, and how much time is
+            // left on the clock.
             CommandGroup(name: "Memory", subcommands: [
                 RecallCommand.self,
                 SQLCommand.self,
                 CacheCommand.self,
+                ReportCommand.self,
                 TimeCommand.self,
             ]),
             // Human-facing — manage your sift install + auto runs.
@@ -42,11 +44,7 @@ struct SiftRoot: AsyncParsableCommand {
                 LeadCommand.self,
                 StatusCommand.self,
                 LogsCommand.self,
-                AttachCommand.self,
                 StopCommand.self,
-            ]),
-            CommandGroup(name: "Report", subcommands: [
-                ExportCommand.self,
             ]),
         ]
     )

@@ -35,4 +35,28 @@ import Testing
     @Test func validateThrowsWithSuggestion() {
         #expect(throws: SiftError.self) { try SessionName.validate("../evil") }
     }
+
+    @Test func suggestKebabsTypicalPrompts() {
+        #expect(SessionName.suggest(from: "Acme Corp Pandora Papers")
+                == "acme-corp-pandora-papers")
+        #expect(SessionName.suggest(from: "multi   spaces") == "multi-spaces")
+        #expect(SessionName.suggest(from: "---leading-and-trailing---")
+                == "leading-and-trailing")
+    }
+
+    @Test func suggestCapsAtFortyCharsWithoutTrailingHyphen() {
+        // The 50-rep "abc " input would naively cap at "abc-abc-…-abc-",
+        // which is exactly the case that needs trailing-hyphen cleanup
+        // *after* truncation.
+        let slug = SessionName.suggest(from: String(repeating: "abc ", count: 50))
+        #expect(slug.count <= 40)
+        #expect(!slug.hasSuffix("-"))
+        #expect(!slug.hasPrefix("-"))
+    }
+
+    @Test func suggestReturnsEmptyForUnusableInput() {
+        #expect(SessionName.suggest(from: "") == "")
+        #expect(SessionName.suggest(from: "   ") == "")
+        #expect(SessionName.suggest(from: "!!!@@@") == "")
+    }
 }

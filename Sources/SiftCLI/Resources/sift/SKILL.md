@@ -26,15 +26,15 @@ $VAULT_MOUNT/
       .pi-sessions/       # pi's own conversation state
 ```
 
-API keys live in the macOS Keychain, not on disk. `sift auto` injects `ALEPH_URL` and `ALEPH_API_KEY` into your environment automatically, so you do not need to export them yourself.
+API keys live in the encrypted vault (`<vault>/secrets.json`). `sift auto` injects `ALEPH_URL` and `ALEPH_API_KEY` into your environment automatically, so you do not need to read the file yourself.
 
 ## Off-limits commands
 
-The sift CLI also exposes setup, run-management, and reporting commands (`sift init`, `sift vault`, `sift backend`, `sift project`, `sift auto`, `sift lead`, `sift status`, `sift logs`, `sift attach`, `sift stop`, `sift export`). **These are for the human operator, not for you.** Never invoke them — you'll either prompt the user for Touch ID, fork another agent, or stop your own run.
+The sift CLI also exposes setup and run-management commands (`sift init`, `sift vault`, `sift backend`, `sift project`, `sift auto`, `sift lead`, `sift status`, `sift logs`, `sift stop`). **These are for the human operator, not for you.** Never invoke them — you'll either prompt the user for the vault passphrase, fork another agent, or stop your own run.
 
-Likewise, never enumerate the macOS Keychain (`security dump-keychain`, `security find-generic-password -s eco.datadesk.sift`, etc.) to discover credentials — Aleph creds are already in your environment as `$ALEPH_URL` / `$ALEPH_API_KEY`. A bulk `security` call triggers a system-wide ACL prompt storm for every keychain item the user owns.
+Aleph creds are already in your environment as `$ALEPH_URL` / `$ALEPH_API_KEY`. Don't try to open `<vault>/secrets.json` yourself — the file is intentionally human-only.
 
-If you need information about the current run (deadline, session dir, available aliases), use the agent-facing commands documented below: `sift time`, `sift recall`, `sift sql`, `sift cache stats`.
+If you need information about the current run (deadline, session dir, available aliases), or about prior investigations on the same vault, use the agent-facing commands documented below: `sift time`, `sift recall`, `sift sql`, `sift cache stats`, `sift report`.
 
 ## Aliases
 
@@ -186,6 +186,18 @@ sift cache stats
 ```
 
 Reports DB size, row counts per table, and the age range of cached responses. Useful when you want to know whether `recall` is likely to find anything before you call it.
+
+### `report`
+
+Read a prior lead's `report.md` to consolidate findings across investigations on the same vault. The vault stores one lead per directory under `$ALEPH_SESSION_DIR`, each with its own `report.md`; this command cats the markdown to stdout so you can search it inline.
+
+```
+sift report --list                # leads with a report.md (sorted by recency)
+sift report <lead>                # cat that lead's report.md
+sift report                       # cat the current lead's report.md
+```
+
+Use `--list` first to see what's available. Lead names are the directory names that appear in `$ALEPH_SESSION_DIR/<lead>/`. Validation rejects path traversal, so you can't escape the research directory.
 
 ## Recording structured findings
 

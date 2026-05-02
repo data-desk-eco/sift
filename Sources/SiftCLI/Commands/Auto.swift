@@ -12,6 +12,9 @@ struct AutoCommand: SiftSubcommand {
             shell — the menu bar item shows live progress, or use `sift status`
             / `sift logs -f` from the terminal. Without PROMPT, drops into pi's
             interactive REPL (foreground).
+
+            On a fresh lead, sift asks for a slug interactively; pass --slug to
+            skip the prompt (required when stdin isn't a TTY).
             """
     )
 
@@ -24,8 +27,11 @@ struct AutoCommand: SiftSubcommand {
             help: "soft deadline (e.g. 30m, 1h30m, 90s); the agent self-paces")
     var timeLimit: String?
     @Flag(name: [.short, .customLong("new")],
-          help: "start a fresh session instead of continuing the most recent one")
+          help: "start a fresh lead instead of continuing the most recent one")
     var new: Bool = false
+    @Option(name: .customLong("slug"),
+            help: "name for a fresh lead (skips the interactive prompt)")
+    var slug: String?
 
     func execute() async throws {
         // Parse the deadline first so a bad value fails fast, before
@@ -44,18 +50,18 @@ struct AutoCommand: SiftSubcommand {
         let promptText = prompt.joined(separator: " ")
 
         // If interactive REPL: figure out resume / fresh; build prelaunch; execve into pi.
-        let vault = VaultService()
-        let mp = try (vault.findExistingMount() ?? vault.unlock())
+        let mp = try requireVault()
         let researchDir = mp.appending(path: "research")
         try Paths.ensure(researchDir)
 
-        // The active lead — if set and still on disk — wins over
-        // "most recent" so the user can pin a particular investigation
-        // and have every `sift auto` invocation default back to it.
-        let leadDir: URL? = ActiveLead.get().flatMap { name in
-            let candidate = researchDir.appending(path: name)
-            return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
-        }
+        // The active lead wins over "most recent" so the user can pin
+        // a particular investigation and have every `sift auto`
+        // invocation default back to it. Don't gate on disk presence:
+        // if the prior run set the marker but the daemon hadn't yet
+        // run `Paths.ensure(sessionDir)` (race) or crashed before it
+        // (missing dir), the user still expects "continue my lead". The
+        // daemon will create the dir during prepare.
+        let leadDir: URL? = ActiveLead.get().map { researchDir.appending(path: $0) }
 
         let canResume = !new && (leadDir != nil
             || PiRunner.mostRecentSession(researchDir: researchDir) != nil)
@@ -69,14 +75,17 @@ struct AutoCommand: SiftSubcommand {
                 newSession: new, leadDir: leadDir
             )
         } else {
-            // New detached session — name it via AI slug (or regex fallback).
-            let name = await PiRunner.newSessionName(prompt: promptText, researchDir: researchDir)
+            // Fresh detached lead — pick a slug (CLI flag, then prompt,
+            // then fall back to a timestamp), then suffix `-2`/`-3` if
+            // the directory already exists.
+            let base = try chooseFreshSlug(explicit: slug, prompt: promptText)
+            let name = PiRunner.uniqueName(researchDir: researchDir, base: base)
             resolution = PiRunner.SessionResolution(
                 sessionDir: researchDir.appending(path: name),
                 resuming: false, staleAge: nil
             )
-            // Pin a fresh session as the active lead — that's almost
-            // always what the user wants next.
+            // Pin a fresh lead as the active one — that's almost always
+            // what the user wants next.
             ActiveLead.set(name)
         }
 
@@ -192,6 +201,39 @@ struct AutoCommand: SiftSubcommand {
         Log.say("auto", "started \(session) (pid \(pid))")
         FileHandle.standardError.write(Data(
             "  → live progress: menu bar item, or `sift status` / `sift logs -f`\n".utf8
+        ))
+    }
+}
+
+// MARK: - Slug picker
+
+/// Resolve the slug for a fresh lead. Three sources, in order:
+///
+///   1. `--slug NAME` — used verbatim (validated, errors fail fast).
+///   2. Interactive prompt on a TTY, with the prompt-derived suggestion
+///      as the default; bad input re-prompts rather than aborting.
+///   3. Non-TTY fallback — the suggestion (or a timestamp if the prompt
+///      produced nothing usable). This is what Shortcuts / scripts hit.
+func chooseFreshSlug(explicit: String?, prompt: String) throws -> String {
+    if let raw = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+        try SessionName.validate(raw)
+        return raw
+    }
+    let suggested = SessionName.suggest(from: prompt)
+    let fallback = suggested.isEmpty ? PiRunner.fallbackTimestamp() : suggested
+
+    let isTTY = isatty(fileno(stdin)) != 0
+    if !isTTY { return fallback }
+
+    while true {
+        let raw = promptUser("slug for this lead [\(fallback)]:")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = raw.isEmpty ? fallback : raw
+        if SessionName.isValid(candidate) {
+            return candidate
+        }
+        FileHandle.standardError.write(Data(
+            "  invalid — use letters, digits, '-', '_', '.'\n".utf8
         ))
     }
 }

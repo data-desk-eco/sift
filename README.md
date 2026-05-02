@@ -16,20 +16,19 @@ sift auto "investigate Acme Corp in the Pandora Papers"
 
 # watch progress (or just glance at the menu bar)
 sift status
-sift logs -f
-sift attach            # live view, q to detach
+sift logs -f           # live tail, Ctrl-C to stop
 ```
 
-After the third command the menu bar app pops up, the agent runs in the background, and you get a notification when it's done. The report lands in your encrypted vault — `sift export` renders it to HTML with live links to the source entities.
+`sift auto` asks for a slug to name the new lead (default derived from the prompt) — pass `--slug acme` to skip the prompt. The menu bar app pops up, the agent runs in the background, and you get a notification when it's done. The report lands in your encrypted vault — `sift report` cats the markdown, `sift report --format html` renders it with live links to the source entities.
 
 ## Highlights
 
-- **`sift auto "PROMPT"`** runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon. Pass `-t 30m` for a soft deadline.
-- **Active lead.** Each fresh `sift auto` becomes your default session — bare `sift logs`, `sift attach`, `sift stop`, and `sift status` (marked `*`) all target it. Switch with `sift lead <session>`.
+- **`sift auto "PROMPT"`** runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon. Pass `-t 30m` for a soft deadline; `--slug` to name a fresh lead non-interactively.
+- **Active lead.** Each fresh `sift auto` becomes the active lead — bare `sift logs`, `sift stop`, and `sift status` (marked `*`) all target it. Switch with `sift lead use <name>`, or `sift lead clear` to fall back to most-recent.
 - **Two LLM backends.** Local Qwen3.6 35B via [llama.cpp](https://github.com/ggml-org/llama.cpp) (nothing leaves your Mac except Aleph queries) or any hosted OpenAI-compatible endpoint. Toggle with `sift backend local|hosted`.
 - **One CLI for humans and agents.** `sift search`, `sift read`, `sift expand`, `sift sql` all work standalone — call them yourself or let the agent drive them. `sift --help` lists everything.
 - **Shortcuts / Siri / Raycast.** The menu bar app registers an **Investigate Subject** App Intent — wire it to a hotkey, a Stream Deck button, or "Hey Siri, investigate X with sift".
-- **Encrypted by default.** Reports and the local cache live in a Touch-ID-gated sparseimage at `~/.sift/`; API keys live in the macOS Keychain.
+- **Encrypted by default.** Reports, the local cache, and API keys all live in a passphrase-protected sparseimage at `~/.sift/.vault.sparseimage`. The passphrase is prompted on first use after a reboot and never persisted; sift can't recover it for you.
 
 ## Requirements
 
