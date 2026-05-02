@@ -1,10 +1,9 @@
 name: ci
 
-# Build + test on every push to main and every PR. Pinned to Xcode 16
-# (Swift 6) so SPM understands `swift-tools-version: 6.0` — the macos-14
-# runner's default toolchain is Swift 5.10, which can't parse the
-# manifest. Tests themselves use swift-testing as an SPM dep, so no
-# Xcode-specific test infrastructure is required.
+# Build + test on every push to main and every PR. Runs on macos-15
+# (which ships Xcode 16, i.e. Swift 6) because Package.swift is on
+# tools-version 6.0; the older macos-14 image only has Xcode 15.4
+# (Swift 5.10), which can't parse the manifest.
 on:
   push:
     branches: [main]
@@ -16,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
