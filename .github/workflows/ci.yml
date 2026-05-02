@@ -1,8 +1,9 @@
 name: ci
 
-# Build + test on every push to main and every PR. Tests use
-# swift-testing as an SPM dependency, so no Xcode is required —
-# Command Line Tools (preinstalled on macos runners) is enough.
+# Build + test on every push to main and every PR. Runs on macos-15
+# (which ships Xcode 16, i.e. Swift 6) because Package.swift is on
+# tools-version 6.0; the older macos-14 image only has Xcode 15.4
+# (Swift 5.10), which can't parse the manifest.
 on:
   push:
     branches: [main]
@@ -14,9 +15,12 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.app
 
       - name: Build (debug)
         run: swift build
