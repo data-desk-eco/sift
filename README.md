@@ -6,7 +6,7 @@ A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.or
 
 ```bash
 # install
-brew install --cask data-desk-eco/sift/sift
+brew install --cask data-desk-eco/tap/sift
 
 # one-time setup: vault, Aleph creds, LLM backend
 sift init

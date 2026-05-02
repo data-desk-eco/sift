@@ -4,7 +4,7 @@ name: release
 # Sources/SiftCore/SiftCore.swift, this workflow builds Sift.app,
 # bundles the CLI + pi inside it, ad-hoc signs, zips, attaches the
 # zip to the GitHub Release, and opens a PR against
-# data-desk-eco/homebrew-sift bumping the cask.
+# data-desk-eco/homebrew-tap bumping the cask.
 on:
   push:
     tags:
@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           tap=$(mktemp -d)
-          git clone "https://x-access-token:${TAP_PAT}@github.com/data-desk-eco/homebrew-sift.git" "$tap"
+          git clone "https://x-access-token:${TAP_PAT}@github.com/data-desk-eco/homebrew-tap.git" "$tap"
           cd "$tap"
           git checkout -b "bump-v${VERSION}"
 
@@ -88,6 +88,6 @@ jobs:
           git commit -m "sift v${VERSION}"
           git push -u origin "bump-v${VERSION}"
           GH_TOKEN="$TAP_PAT" gh pr create \
-            --repo data-desk-eco/homebrew-sift \
+            --repo data-desk-eco/homebrew-tap \
             --title "sift v${VERSION}" \
             --body "Auto-bumped by sift release workflow.\n\nSHA256: \`${SHA256}\`"
