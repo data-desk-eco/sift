@@ -16,7 +16,7 @@ func emit(_ result: String) {
 
 // MARK: - Aleph queries
 
-struct SearchCommand: AsyncParsableCommand {
+struct SearchCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "search", abstract: "Search the collection for hits."
     )
@@ -33,29 +33,25 @@ struct SearchCommand: AsyncParsableCommand {
     @Option(name: .customLong("date-from")) var dateFrom: String?
     @Option(name: .customLong("date-to")) var dateTo: String?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = SearchInput(
-                query: query.joined(separator: " "),
-                type: type ?? "any",
-                limit: limit ?? 10,
-                offset: offset ?? 0,
-                collection: collection,
-                sortByDate: sort == "date",
-                noCache: noCache,
-                emitter: emitter, recipient: recipient, mentions: mentions,
-                dateFrom: dateFrom, dateTo: dateTo
-            )
-            emit(try await runSearch(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = SearchInput(
+            query: query.joined(separator: " "),
+            type: type ?? "any",
+            limit: limit ?? 10,
+            offset: offset ?? 0,
+            collection: collection,
+            sortByDate: sort == "date",
+            noCache: noCache,
+            emitter: emitter, recipient: recipient, mentions: mentions,
+            dateFrom: dateFrom, dateTo: dateTo
+        )
+        emit(try await runSearch(client: client, store: store, input: input))
     }
 }
 
-struct ReadCommand: AsyncParsableCommand {
+struct ReadCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "read", abstract: "Pull the full content of an entity by alias."
     )
@@ -63,39 +59,31 @@ struct ReadCommand: AsyncParsableCommand {
     @Flag(name: [.short, .customLong("full")]) var full: Bool = false
     @Flag(name: [.short, .customLong("raw")]) var raw: Bool = false
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = ReadInput(alias: alias, full: full, raw: raw)
-            emit(try await runRead(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = ReadInput(alias: alias, full: full, raw: raw)
+        emit(try await runRead(client: client, store: store, input: input))
     }
 }
 
-struct SourcesCommand: AsyncParsableCommand {
+struct SourcesCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "sources", abstract: "List Aleph collections visible to your API key."
     )
     @Argument var grep: [String] = []
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let g = grep.joined(separator: " ")
-            let input = SourcesInput(grep: g.isEmpty ? nil : g, limit: limit ?? 50)
-            emit(try await runSources(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let g = grep.joined(separator: " ")
+        let input = SourcesInput(grep: g.isEmpty ? nil : g, limit: limit ?? 50)
+        emit(try await runSources(client: client, store: store, input: input))
     }
 }
 
-struct HubsCommand: AsyncParsableCommand {
+struct HubsCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "hubs",
         abstract: "Top emitters / recipients / mentions for entities matching a query."
@@ -105,23 +93,19 @@ struct HubsCommand: AsyncParsableCommand {
     @Option var schema: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = HubsInput(
-                query: query.joined(separator: " "),
-                collection: collection, schema: schema ?? "Email",
-                limit: limit ?? 10
-            )
-            emit(try await runHubs(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = HubsInput(
+            query: query.joined(separator: " "),
+            collection: collection, schema: schema ?? "Email",
+            limit: limit ?? 10
+        )
+        emit(try await runHubs(client: client, store: store, input: input))
     }
 }
 
-struct SimilarCommand: AsyncParsableCommand {
+struct SimilarCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "similar",
         abstract: "Aleph-extracted name-variant candidates for a party entity."
@@ -129,19 +113,15 @@ struct SimilarCommand: AsyncParsableCommand {
     @Argument var alias: String
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = SimilarInput(alias: alias, limit: limit ?? 10)
-            emit(try await runSimilar(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = SimilarInput(alias: alias, limit: limit ?? 10)
+        emit(try await runSimilar(client: client, store: store, input: input))
     }
 }
 
-struct ExpandCommand: AsyncParsableCommand {
+struct ExpandCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "expand", abstract: "Show entities linked via FtM property refs."
     )
@@ -150,41 +130,33 @@ struct ExpandCommand: AsyncParsableCommand {
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
     @Flag(name: .customLong("no-cache")) var noCache: Bool = false
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = ExpandInput(
-                alias: alias, property: property,
-                limit: limit ?? 20, noCache: noCache
-            )
-            emit(try await runExpand(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = ExpandInput(
+            alias: alias, property: property,
+            limit: limit ?? 20, noCache: noCache
+        )
+        emit(try await runExpand(client: client, store: store, input: input))
     }
 }
 
-struct BrowseCommand: AsyncParsableCommand {
+struct BrowseCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "browse", abstract: "Filesystem-style: parent folder and siblings."
     )
     @Argument var alias: String
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = BrowseInput(alias: alias, limit: limit ?? 30)
-            emit(try await runBrowse(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = BrowseInput(alias: alias, limit: limit ?? 30)
+        emit(try await runBrowse(client: client, store: store, input: input))
     }
 }
 
-struct TreeCommand: AsyncParsableCommand {
+struct TreeCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "tree", abstract: "ASCII subtree of a folder or collection roots."
     )
@@ -193,22 +165,18 @@ struct TreeCommand: AsyncParsableCommand {
     @Option var depth: Int?
     @Option(name: .customLong("max-siblings")) var maxSiblings: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let client = try Sift.makeAlephClient()
-            let input = TreeInput(
-                alias: alias, collection: collection,
-                depth: depth ?? 3, maxSiblings: maxSiblings ?? 20
-            )
-            emit(try await runTree(client: client, store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        let input = TreeInput(
+            alias: alias, collection: collection,
+            depth: depth ?? 3, maxSiblings: maxSiblings ?? 20
+        )
+        emit(try await runTree(client: client, store: store, input: input))
     }
 }
 
-struct NeighborsCommand: AsyncParsableCommand {
+struct NeighborsCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "neighbours", abstract: "Show every cached edge touching an entity."
     )
@@ -217,23 +185,19 @@ struct NeighborsCommand: AsyncParsableCommand {
     @Option(name: .customLong("property")) var property: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let input = NeighborsInput(
-                alias: alias, direction: direction ?? "both",
-                property: property, limit: limit ?? 50
-            )
-            emit(try runNeighbors(store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let input = NeighborsInput(
+            alias: alias, direction: direction ?? "both",
+            property: property, limit: limit ?? 50
+        )
+        emit(try runNeighbors(store: store, input: input))
     }
 }
 
 // MARK: - Local cache
 
-struct RecallCommand: AsyncParsableCommand {
+struct RecallCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "recall", abstract: "Summarise what's in the local cache."
     )
@@ -241,32 +205,24 @@ struct RecallCommand: AsyncParsableCommand {
     @Option var schema: String?
     @Option(name: [.short, .customLong("limit")]) var limit: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            let input = RecallInput(
-                collection: collection, schema: schema, limit: limit ?? 15
-            )
-            emit(try runRecall(store: store, input: input))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        let input = RecallInput(
+            collection: collection, schema: schema, limit: limit ?? 15
+        )
+        emit(try runRecall(store: store, input: input))
     }
 }
 
-struct SQLCommand: AsyncParsableCommand {
+struct SQLCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "sql", abstract: "Read-only SQL against the cache DB."
     )
     @Argument var query: String
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            emit(try runSQL(store: store, input: SQLInput(query: query)))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        emit(try runSQL(store: store, input: SQLInput(query: query)))
     }
 }
 
@@ -279,30 +235,22 @@ struct CacheCommand: AsyncParsableCommand {
     )
 }
 
-struct CacheStats: AsyncParsableCommand {
+struct CacheStats: SiftSubcommand {
     static let configuration = CommandConfiguration(commandName: "stats")
-    func run() async throws {
-        do {
-            emit(try runCacheStats(store: try openSessionStore()))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        emit(try runCacheStats(store: try openSessionStore()))
     }
 }
 
-struct CacheClear: AsyncParsableCommand {
+struct CacheClear: SiftSubcommand {
     static let configuration = CommandConfiguration(commandName: "clear")
     @Option(name: .customLong("older-than-days")) var olderThanDays: Int?
 
-    func run() async throws {
-        do {
-            let store = try openSessionStore()
-            emit(try runCacheClear(
-                store: store,
-                input: CacheClearInput(olderThanDays: olderThanDays)
-            ))
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        let store = try openSessionStore()
+        emit(try runCacheClear(
+            store: store,
+            input: CacheClearInput(olderThanDays: olderThanDays)
+        ))
     }
 }

@@ -1,9 +1,11 @@
 import Foundation
-import XCTest
+import Testing
 @testable import SiftCore
 
-final class ReportTests: XCTestCase {
+@Suite struct ReportTests {
 
+    /// Build a fresh store seeded with two aliased entities. The temp
+    /// dir is cleaned up by the test harness's per-test isolation.
     private func storeWithAliases() throws -> (Store, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appending(path: "sift-report-test-\(UUID().uuidString)")
@@ -22,7 +24,7 @@ final class ReportTests: XCTestCase {
         return (store, dir)
     }
 
-    func testSubstituteAliasesLinksProseOnly() throws {
+    @Test func substituteAliasesLinksProseOnly() throws {
         let (store, dir) = try storeWithAliases()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -37,14 +39,14 @@ final class ReportTests: XCTestCase {
             defaultServer: "https://aleph.example.org/api/2",
             counts: &counts
         )
-        XCTAssertEqual(counts.linked, 2)
-        XCTAssertTrue(out.contains("https://aleph.example.org/entities/ent-A"))
-        XCTAssertTrue(out.contains("https://aleph.example.org/entities/ent-B"))
-        XCTAssertTrue(out.contains("r99 in code block"))
-        XCTAssertTrue(out.contains("<code>r88</code>"))
+        #expect(counts.linked == 2)
+        #expect(out.contains("https://aleph.example.org/entities/ent-A"))
+        #expect(out.contains("https://aleph.example.org/entities/ent-B"))
+        #expect(out.contains("r99 in code block"))
+        #expect(out.contains("<code>r88</code>"))
     }
 
-    func testUnresolvedAliasIsCounted() throws {
+    @Test func unresolvedAliasIsCounted() throws {
         let (store, dir) = try storeWithAliases()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -55,28 +57,24 @@ final class ReportTests: XCTestCase {
             defaultServer: "https://aleph.example.org",
             counts: &counts
         )
-        XCTAssertEqual(counts.linked, 1)
-        XCTAssertEqual(counts.unresolved, 1)
-        XCTAssertTrue(out.contains("r999"))
+        #expect(counts.linked == 1)
+        #expect(counts.unresolved == 1)
+        #expect(out.contains("r999"))
     }
 
-    func testAliasLinkURLStripsApiPath() {
+    @Test func aliasLinkURLStripsApiPath() {
         let link = Report.AliasLink(
             alias: "r1", entityId: "ent-A",
             schema: "Organization", name: "Acme"
         )
-        XCTAssertEqual(
-            link.url(server: "https://aleph.example.org/api/2"),
-            "https://aleph.example.org/entities/ent-A"
-        )
-        XCTAssertEqual(
-            link.url(server: "https://aleph.example.org/"),
-            "https://aleph.example.org/entities/ent-A"
-        )
-        XCTAssertNil(link.url(server: nil))
+        #expect(link.url(server: "https://aleph.example.org/api/2")
+                == "https://aleph.example.org/entities/ent-A")
+        #expect(link.url(server: "https://aleph.example.org/")
+                == "https://aleph.example.org/entities/ent-A")
+        #expect(link.url(server: nil) == nil)
     }
 
-    func testRenderHTMLEndToEnd() throws {
+    @Test func renderHTMLEndToEnd() throws {
         let (store, dir) = try storeWithAliases()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -94,9 +92,9 @@ final class ReportTests: XCTestCase {
             defaultServer: "https://aleph.example.org",
             title: "test", meta: ""
         )
-        XCTAssertEqual(result.counts.linked, 2)
-        XCTAssertTrue(result.html.contains("<title>test</title>"))
-        XCTAssertTrue(result.html.contains("https://aleph.example.org/entities/ent-A"))
-        XCTAssertTrue(result.html.contains("r88 in fenced code"))
+        #expect(result.counts.linked == 2)
+        #expect(result.html.contains("<title>test</title>"))
+        #expect(result.html.contains("https://aleph.example.org/entities/ent-A"))
+        #expect(result.html.contains("r88 in fenced code"))
     }
 }

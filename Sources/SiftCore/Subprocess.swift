@@ -1,7 +1,8 @@
 import Foundation
 
-/// Mirror of Python's `subprocess.run(input=, capture_output=True)`.
-/// Reads stdout and stderr concurrently to avoid pipe-buffer deadlocks.
+/// Run a child process and capture stdout + stderr. Reads both streams
+/// concurrently so a child that writes >64 KiB to either pipe (the
+/// macOS pipe buffer limit) doesn't deadlock waiting for us to drain.
 public enum Subprocess {
     public struct Result: Sendable {
         public let stdout: String
@@ -82,10 +83,19 @@ public enum Subprocess {
         return result
     }
 
-    /// Find an executable on PATH. Returns nil if not found.
+    /// Find an executable on `PATH`. Returns nil if not found. Pure
+    /// Swift — no fork/exec — so it's safe to call from inside hot
+    /// paths and Touch-ID-gated flows.
     public static func which(_ name: String) -> String? {
-        let result = try? run(["/usr/bin/env", "which", name])
-        guard let out = result?.stdout, !out.isEmpty else { return nil }
-        return out
+        guard let path = ProcessInfo.processInfo.environment["PATH"] else {
+            return nil
+        }
+        for dir in path.split(separator: ":") {
+            let candidate = "\(dir)/\(name)"
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 }

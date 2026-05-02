@@ -13,51 +13,39 @@ struct ProjectCommand: AsyncParsableCommand {
     )
 }
 
-struct ProjectShow: AsyncParsableCommand {
+struct ProjectShow: SiftSubcommand {
     static let configuration = CommandConfiguration(commandName: "show")
-    func run() async throws {
-        do {
-            try printProject()
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        try printProject()
     }
 }
 
-struct ProjectSet: AsyncParsableCommand {
+struct ProjectSet: SiftSubcommand {
     static let configuration = CommandConfiguration(commandName: "set")
     @Argument var description: String?
 
-    func run() async throws {
-        do {
-            let body = (description ?? promptUser("Briefly describe the project (data source and subject of investigation):"))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !body.isEmpty else {
-                throw SiftError("description required")
-            }
-            try Paths.ensureSiftHome()
-            try (body + "\n").write(to: Paths.projectFile, atomically: true, encoding: .utf8)
-            print("[project]  saved to \(Paths.projectFile.path)")
-        } catch {
-            throw ExitCode(reportSiftError(error))
+    func execute() async throws {
+        let body = (description ?? promptUser("Briefly describe the project (data source and subject of investigation):"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else {
+            throw SiftError("description required")
         }
+        try Paths.ensureSiftHome()
+        try (body + "\n").write(to: Paths.projectFile, atomically: true, encoding: .utf8)
+        print("[project]  saved to \(Paths.projectFile.path)")
     }
 }
 
-struct ProjectEdit: AsyncParsableCommand {
+struct ProjectEdit: SiftSubcommand {
     static let configuration = CommandConfiguration(commandName: "edit")
-    func run() async throws {
-        do {
-            try Paths.ensureSiftHome()
-            let editor = ProcessInfo.processInfo.environment["EDITOR"] ?? "vi"
-            let proc = Process()
-            proc.executableURL = URL(filePath: "/usr/bin/env")
-            proc.arguments = [editor, Paths.projectFile.path]
-            try proc.run()
-            proc.waitUntilExit()
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
+    func execute() async throws {
+        try Paths.ensureSiftHome()
+        let editor = ProcessInfo.processInfo.environment["EDITOR"] ?? "vi"
+        let proc = Process()
+        proc.executableURL = URL(filePath: "/usr/bin/env")
+        proc.arguments = [editor, Paths.projectFile.path]
+        try proc.run()
+        proc.waitUntilExit()
     }
 }
 

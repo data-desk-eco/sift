@@ -41,7 +41,6 @@ public struct Deadline: Sendable {
         var consumed = 0
         var total = 0
         for match in matches {
-            guard match.range.length == match.range.length else { continue }
             consumed += match.range.length
             guard let nrange = Range(match.range(at: 1), in: cleaned),
                   let urange = Range(match.range(at: 2), in: cleaned),

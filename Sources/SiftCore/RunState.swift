@@ -53,6 +53,7 @@ public enum RunRegistry {
     }
 
     public static func write(_ state: RunState) throws {
+        try SessionName.validate(state.session)
         try Paths.ensure(Paths.runDir)
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -61,15 +62,21 @@ public enum RunRegistry {
         try data.write(to: filePath(for: state.session), options: .atomic)
     }
 
+    /// Returns nil if the session name is malformed (treats it as
+    /// "not found" so callers don't have to special-case validation).
     public static func read(_ session: String) -> RunState? {
-        read(at: filePath(for: session))
+        guard SessionName.isValid(session) else { return nil }
+        return read(at: filePath(for: session))
     }
 
     public static func read(at url: URL) -> RunState? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try? decoder.decode(RunState.self, from: data)
+        guard let state = try? decoder.decode(RunState.self, from: data),
+              SessionName.isValid(state.session)
+        else { return nil }
+        return state
     }
 
     /// All run-state files, sorted by start time (newest first).
@@ -107,6 +114,18 @@ public enum RunRegistry {
     /// the caller doesn't change.
     public static func update(_ session: String, _ mutate: (inout RunState) -> Void) throws {
         guard var state = read(session) else { return }
+        mutate(&state)
+        try write(state)
+    }
+
+    /// Like `update`, but only fires the mutation if the on-disk status
+    /// is still `.running`. Used by the daemon's per-event progress
+    /// updates so they can't clobber a `Stop`-written `.stopped` status
+    /// in the read-mutate-write window.
+    public static func updateIfRunning(
+        _ session: String, _ mutate: (inout RunState) -> Void
+    ) throws {
+        guard var state = read(session), state.status == .running else { return }
         mutate(&state)
         try write(state)
     }

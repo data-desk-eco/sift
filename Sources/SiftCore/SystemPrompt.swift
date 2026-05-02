@@ -67,7 +67,7 @@ public enum SystemPrompt {
         return Paths.systemPromptFile
     }
 
-    private static func stripFrontmatter(_ text: String) -> String {
+    static func stripFrontmatter(_ text: String) -> String {
         guard text.hasPrefix("---") else { return text }
         let after = text.index(text.startIndex, offsetBy: 3)
         guard let endRange = text.range(of: "\n---", range: after..<text.endIndex) else {

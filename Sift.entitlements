@@ -2,11 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Read/write the user's ~/.sift, the vault mount, and Aleph creds in Keychain. -->
-  <key>com.apple.security.app-sandbox</key>          <false/>
-  <!-- Touch ID for vault unlock. -->
-  <key>com.apple.security.smartcard</key>            <false/>
-  <!-- Allow our App Intent to spawn the sift CLI subprocess. -->
+  <!-- Pi is a Node.js binary that loads dynamic libraries Apple
+       hasn't signed. Hardened-runtime enforcement (codesign
+       --options runtime) blocks that by default; these two
+       entitlements allow it. Required for the App Intent's
+       child-process spawn of the bundled `sift` CLI to succeed
+       when that CLI re-execs into pi. -->
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key> <true/>
   <key>com.apple.security.cs.disable-library-validation</key>       <true/>
 </dict>

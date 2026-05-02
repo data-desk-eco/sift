@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import SiftCore
 
-struct LogsCommand: AsyncParsableCommand {
+struct LogsCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "logs",
         abstract: "Tail the most recent auto-session log."
@@ -16,42 +16,38 @@ struct LogsCommand: AsyncParsableCommand {
           help: "follow the log as it grows (Ctrl-C to stop)")
     var follow: Bool = false
 
-    func run() async throws {
-        do {
-            let state: RunState
-            if let name = session {
-                guard let s = RunRegistry.read(name) else {
-                    throw SiftError(
-                        "no such session: \(name)",
-                        suggestion: "run 'sift status -a' to list them"
-                    )
-                }
-                state = s
-            } else if let lead = ActiveLead.get(), let s = RunRegistry.read(lead) {
-                state = s
-            } else {
-                guard let s = RunRegistry.mostRecent() else {
-                    throw SiftError("no sift auto sessions on record")
-                }
-                state = s
-            }
-
-            let logURL = URL(filePath: state.logPath)
-            if !FileManager.default.fileExists(atPath: logURL.path) {
+    func execute() async throws {
+        let state: RunState
+        if let name = session {
+            guard let s = RunRegistry.read(name) else {
                 throw SiftError(
-                    "log file missing: \(logURL.path)",
-                    suggestion: "the session may have failed to start; check 'sift status -a'"
+                    "no such session: \(name)",
+                    suggestion: "run 'sift status -a' to list them"
                 )
             }
-
-            if follow {
-                try await tail(logURL: logURL, state: state)
-            } else {
-                let data = (try? Data(contentsOf: logURL)) ?? Data()
-                FileHandle.standardOutput.write(data)
+            state = s
+        } else if let lead = ActiveLead.get(), let s = RunRegistry.read(lead) {
+            state = s
+        } else {
+            guard let s = RunRegistry.mostRecent() else {
+                throw SiftError("no sift auto sessions on record")
             }
-        } catch {
-            throw ExitCode(reportSiftError(error))
+            state = s
+        }
+
+        let logURL = URL(filePath: state.logPath)
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            throw SiftError(
+                "log file missing: \(logURL.path)",
+                suggestion: "the session may have failed to start; check 'sift status -a'"
+            )
+        }
+
+        if follow {
+            try await tail(logURL: logURL, state: state)
+        } else {
+            let data = (try? Data(contentsOf: logURL)) ?? Data()
+            FileHandle.standardOutput.write(data)
         }
     }
 

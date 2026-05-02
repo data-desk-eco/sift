@@ -42,8 +42,15 @@ public enum PiRunner {
     public static let staleSessionHours = 24
 
     public static func resolveSession(
-        researchDir: URL, prompt: String?, newSession: Bool, freshSlug: String?
+        researchDir: URL, prompt: String?, newSession: Bool,
+        leadDir: URL? = nil, freshSlug: String? = nil
     ) -> SessionResolution {
+        // Active lead — if the user has pinned one — wins over "most
+        // recent" so a typed `sift auto` always lands on the same
+        // investigation until they explicitly --new or `sift lead --clear`.
+        if !newSession, let leadDir {
+            return SessionResolution(sessionDir: leadDir, resuming: true, staleAge: nil)
+        }
         if !newSession, let last = mostRecentSession(researchDir: researchDir) {
             let lastMod = lastModified(of: last)
             let ageHours = (Date().timeIntervalSince1970 - lastMod) / 3600
@@ -155,13 +162,12 @@ public enum PiRunner {
         prelaunch: Prelaunch, prompt: String, debug: Bool
     ) async throws -> Int32 {
         let logPath = prelaunch.sessionDir.appending(path: "auto.log")
-        if !FileManager.default.fileExists(atPath: logPath.path) {
-            FileManager.default.createFile(atPath: logPath.path, contents: nil)
-        }
-        guard let logHandle = try? FileHandle(forWritingTo: logPath) else {
+        let logHandle: FileHandle
+        do {
+            logHandle = try RotatingLog.openForAppend(at: logPath)
+        } catch {
             throw SiftError("can't open \(logPath.path) for write")
         }
-        try logHandle.seekToEnd()
 
         var state = RunState(
             session: prelaunch.session,
@@ -196,11 +202,7 @@ public enum PiRunner {
 
         let stdoutPipe = Pipe()
         let stderrPath = prelaunch.sessionDir.appending(path: "pi.stderr.log")
-        if !FileManager.default.fileExists(atPath: stderrPath.path) {
-            FileManager.default.createFile(atPath: stderrPath.path, contents: nil)
-        }
-        let stderrHandle = try FileHandle(forWritingTo: stderrPath)
-        try stderrHandle.seekToEnd()
+        let stderrHandle = try RotatingLog.openForAppend(at: stderrPath)
 
         pi.standardInput = FileHandle(forReadingAtPath: "/dev/null")
         pi.standardOutput = stdoutPipe
@@ -212,6 +214,11 @@ public enum PiRunner {
         var stream = EventStream(debug: debug)
         let reader = stdoutPipe.fileHandleForReading
         var buffer = Data()
+        // Cap any single line so a runaway event payload can't OOM the
+        // daemon. Pi's JSON events are kilobytes in practice; 4 MiB
+        // covers tool-result blobs comfortably and discards the rest.
+        let maxLineBytes = 4 * 1024 * 1024
+        var dropping = false
         while true {
             let chunk = reader.availableData
             if chunk.isEmpty { break }
@@ -219,6 +226,12 @@ public enum PiRunner {
             while let nlIndex = buffer.firstIndex(of: 0x0a) {
                 let lineData = buffer.subdata(in: 0..<nlIndex)
                 buffer.removeSubrange(0...nlIndex)
+                if dropping {
+                    // We just consumed the trailing newline of an oversized
+                    // line; pick up the next one fresh.
+                    dropping = false
+                    continue
+                }
                 guard let line = String(data: lineData, encoding: .utf8) else { continue }
                 for event in stream.ingest(line) {
                     if !event.formatted.isEmpty {
@@ -227,13 +240,25 @@ public enum PiRunner {
                         }
                     }
                     if !event.scope.isEmpty, !event.isFinalText {
-                        try? RunRegistry.update(prelaunch.session) { st in
+                        // Skip clobber-protect: if `sift stop` flipped the
+                        // status to .stopped while we were reading the file,
+                        // don't write .running back over it.
+                        try? RunRegistry.updateIfRunning(prelaunch.session) { st in
                             st.lastScope = event.scope
                             st.lastMessage = event.message
                             st.lastEventAt = Int(Date().timeIntervalSince1970)
                         }
                     }
                 }
+            }
+            // No newline yet but the buffer is past the cap — drop the
+            // partial line and ignore everything until the next newline.
+            if !dropping, buffer.count > maxLineBytes {
+                buffer.removeAll(keepingCapacity: false)
+                dropping = true
+                try? logHandle.write(contentsOf: Data(
+                    "[stream]   dropped oversized event line\n".utf8
+                ))
             }
         }
 
@@ -244,7 +269,12 @@ public enum PiRunner {
         let code = pi.terminationStatus
         let now = Int(Date().timeIntervalSince1970)
         try RunRegistry.update(prelaunch.session) { st in
-            st.status = code == 0 ? .finished : .failed
+            // If `sift stop` already flipped this to .stopped, keep that —
+            // pi exits non-zero on SIGTERM and we don't want the user's
+            // stop intent reported back as a failure.
+            if st.status != .stopped {
+                st.status = code == 0 ? .finished : .failed
+            }
             st.exitCode = code
             st.finishedAt = now
             st.lastEventAt = now

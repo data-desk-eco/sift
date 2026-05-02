@@ -8,6 +8,18 @@ public enum Log {
     public static func error(_ message: String) { write("ERROR", message) }
     public static func debug(_ message: String) { write("DEBUG", message) }
 
+    /// Write a `[scope]   message` line to stderr, with `scope` padded
+    /// to 9 columns to match `EventStream`'s log shape. Used by every
+    /// `sift` subcommand for visible CLI progress.
+    public static func say(_ scope: String, _ message: String) {
+        let tag = "[\(scope)]"
+        let padded = tag.count >= 9
+            ? tag
+            : tag + String(repeating: " ", count: 9 - tag.count)
+        let line = "\(padded) \(message)\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
     private static var logPath: URL {
         try? Paths.ensure(Paths.logDir)
         return Paths.logDir.appending(path: "sift.log")
@@ -23,17 +35,12 @@ public enum Log {
         let ts = ISO8601DateFormatter().string(from: Date())
         let line = "\(ts)  \(level.padding(toLength: 5, withPad: " ", startingAt: 0))  \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
-        let path = logPath
-        if let handle = try? FileHandle(forWritingTo: path) {
-            do {
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-                try handle.close()
-            } catch {
-                osLog.error("log file write failed: \(error.localizedDescription)")
-            }
-        } else {
-            FileManager.default.createFile(atPath: path.path, contents: data)
+        do {
+            let handle = try RotatingLog.openForAppend(at: logPath)
+            try handle.write(contentsOf: data)
+            try handle.close()
+        } catch {
+            osLog.error("log file write failed: \(error.localizedDescription)")
         }
     }
 }

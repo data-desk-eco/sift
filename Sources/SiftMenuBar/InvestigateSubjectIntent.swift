@@ -117,16 +117,14 @@ struct InvestigateSubjectIntent: AppIntent {
     }
 
     private func parseSessionName(_ stderr: String) -> String? {
-        for line in stderr.split(separator: "\n") {
-            // Match "[auto]     started <session> (pid <n>)"
-            let s = String(line)
-            if let r = s.range(of: #"started\s+(\S+)\s+\(pid"#, options: .regularExpression) {
-                let segment = s[r]
-                let parts = segment.split(separator: " ")
-                if parts.count >= 2 { return String(parts[1]) }
-            }
-        }
-        return nil
+        // Match the first capture group of "started <session> (pid".
+        guard let re = try? NSRegularExpression(pattern: #"started\s+(\S+)\s+\(pid"#)
+        else { return nil }
+        let range = NSRange(stderr.startIndex..., in: stderr)
+        guard let match = re.firstMatch(in: stderr, range: range),
+              let r = Range(match.range(at: 1), in: stderr)
+        else { return nil }
+        return String(stderr[r])
     }
 }
 

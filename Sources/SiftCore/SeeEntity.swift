@@ -2,10 +2,9 @@ import Foundation
 
 /// Recursively cache an Aleph entity blob, assign it a stable alias,
 /// and walk its nested entity refs (emitters, recipients, mentions,
-/// parent, …) so they all get aliases without round-trips.
-///
-/// Same algorithm as sift's Python `see_entity`, kept as a free function
-/// to mirror the original surface.
+/// parent, …) so they all get aliases without round-trips. Free
+/// function rather than a method on `Store` because the recursion
+/// needs a `seen` set passed by reference.
 @discardableResult
 public func seeEntity(
     store: Store,

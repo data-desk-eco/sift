@@ -30,11 +30,6 @@ final class RunStateModel {
         states.filter { $0.status == .running && RunRegistry.pidAlive($0.pid) }
     }
 
-    var recent: [RunState] {
-        let activeIds = Set(active.map { $0.session })
-        return states.filter { !activeIds.contains($0.session) }
-    }
-
     /// Symbol shown in the menu bar.
     var indicatorSymbol: String {
         if active.isEmpty { return "magnifyingglass" }
@@ -147,10 +142,13 @@ final class RunStateModel {
             .map { "\($0)/.local/bin/sift" } ?? "sift"
         let script = """
             #!/bin/zsh -l
-            exec \(shellQuote(siftPath)) logs -f \(shellQuote(state.session))
+            exec \(Sift.shellQuote(siftPath)) logs -f \(Sift.shellQuote(state.session))
             """
-        let url = FileManager.default.temporaryDirectory
-            .appending(path: "sift-tail-\(state.session).command")
+        // Stable per-session path so repeated clicks reuse one file
+        // instead of leaving a fresh tmp turd in /tmp every time.
+        let dir = Paths.siftHome.appending(path: "tail")
+        try? Paths.ensure(dir)
+        let url = dir.appending(path: "\(state.session).command")
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes(
@@ -163,10 +161,6 @@ final class RunStateModel {
         }
     }
 
-    private func shellQuote(_ s: String) -> String {
-        if s.range(of: #"^[A-Za-z0-9_./-]+$"#, options: .regularExpression) != nil { return s }
-        return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
 }
 
 // MARK: - Equatable for RunState (for SwiftUI ForEach diffing)

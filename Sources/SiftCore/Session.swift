@@ -1,9 +1,12 @@
 import Foundation
 
-/// Resolves the session sqlite path the way the Python CLI did:
-///   1. ALEPH_DB_PATH override (used by the agent)
-///   2. ALEPH_SESSION_DIR / aleph.sqlite (vault mount)
-///   3. fall back to ~/.sift/aleph.sqlite for one-shot CLI use
+/// Resolve the cache sqlite path used by every research command:
+///   1. `ALEPH_DB_PATH` override (set by agent harnesses for tests)
+///   2. `ALEPH_SESSION_DIR/aleph.sqlite` (the vault-mount path the
+///      daemon injects — shared across every session on the vault, so
+///      aliases stay stable across investigations)
+///   3. `<vault>/research/aleph.sqlite` if the vault is mounted
+///   4. `~/.sift/aleph.sqlite` for one-shot CLI use without a vault
 public enum Session {
     public static func dbPath() throws -> URL {
         let env = ProcessInfo.processInfo.environment

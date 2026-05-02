@@ -2,8 +2,8 @@ import Foundation
 import LocalAuthentication
 
 /// Touch ID gate. Returns true on biometric success or when biometrics
-/// aren't available on this Mac (matches aileph behaviour — we don't
-/// want to brick CI / older hardware).
+/// aren't available on this Mac (so CI runners and older hardware
+/// without TouchID don't brick on every vault unlock).
 public enum TouchID {
     public static var available: Bool {
         LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)

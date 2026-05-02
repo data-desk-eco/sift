@@ -58,8 +58,8 @@ struct SiftRoot: AsyncParsableCommand {
     }
 }
 
-/// Surface SiftError in the same `[ERROR]\n  → suggestion` shape the
-/// Python CLI used. Used by every subcommand's run().
+/// Surface a SiftError as `[ERROR]    msg\n  → suggestion`. Called by
+/// `SiftSubcommand`'s default `run()` when execute() throws.
 @discardableResult
 func reportSiftError(_ error: Error) -> Int32 {
     if let s = error as? SiftError {

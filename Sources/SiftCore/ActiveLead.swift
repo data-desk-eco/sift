@@ -17,13 +17,17 @@ public enum ActiveLead {
               let raw = String(data: data, encoding: .utf8)
         else { return nil }
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
+        // Treat a corrupted lead file (someone wrote junk, or a name
+        // with `..` / `/`) as "no lead" rather than letting it become
+        // a filesystem path component downstream.
+        guard SessionName.isValid(name) else { return nil }
+        return name
     }
 
     @discardableResult
     public static func set(_ name: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard SessionName.isValid(trimmed) else { return false }
         try? Paths.ensure(Paths.siftHome)
         do {
             try (trimmed + "\n").data(using: .utf8)?.write(to: path, options: .atomic)

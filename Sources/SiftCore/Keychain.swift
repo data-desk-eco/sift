@@ -46,9 +46,7 @@ public enum Keychain {
             &error
         )
         if acl == nil, let e = error?.takeRetainedValue() {
-            FileHandle.standardError.write(Data(
-                "[keychain] biometric ACL unavailable: \(e)\n".utf8
-            ))
+            Log.say("keychain", "biometric ACL unavailable: \(e)")
         }
         return acl
     }

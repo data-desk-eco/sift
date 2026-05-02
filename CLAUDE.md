@@ -22,7 +22,7 @@ Native macOS tool for investigating subjects in Aleph / OpenAleph, plus a self-d
 - Production install (what users actually run): `brew install --cask data-desk-eco/tap/sift`. The cask in `data-desk-eco/homebrew-tap` points at a release zip built by `.github/workflows/release.yml`; the resulting `Sift.app` bundles the CLI at `Contents/Resources/bin/sift` and pi at `Contents/Resources/pi/`. `Paths.findExecutable` walks up from `Bundle.main` to find the .app and prefers in-bundle tooling, falling back to the support-dir layout for dev installs.
 - Cut a release: bump `Sources/SiftCore/SiftCore.swift` `version`, commit, `git tag v<X.Y.Z>`, `git push --tags`. The workflow builds the bundle, attaches the zip to the release, and (if `TAP_PAT` secret is set) opens a PR against `data-desk-eco/homebrew-tap` bumping `Casks/sift.rb`. Locally: `make release` produces the same artefact under `.build/release-bundle/`.
 - Wipe the dev install: `make uninstall` (keeps the user's vault state under `~/.sift/`).
-- Tests live in `Tests/SiftCoreTests/` (XCTest). They compile under Xcode but `swift test` won't work on a Command Line Tools-only host — XCTest isn't shipped. Run them via Xcode or a CI runner with full Xcode.
+- Tests live in `Tests/SiftCoreTests/` and use [swift-testing](https://github.com/swiftlang/swift-testing) (pulled as an SPM dep so it works on Command Line Tools alone — no Xcode needed). Run with `make test` or `swift test`.
 - Every CLI smoke test must use `SIFT_HOME=/tmp/something` — see the feedback memory.
 - The agent voice in `Resources/AGENTS.md` and `Resources/sift/SKILL.md` is deliberately neutral / wire-service. Don't loosen it when editing prompts.
 

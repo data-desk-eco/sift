@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import SiftCore
 
-struct AutoCommand: AsyncParsableCommand {
+struct AutoCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "auto",
         abstract: "Run the agent. Returns to the shell once a detached run starts.",
@@ -27,15 +27,7 @@ struct AutoCommand: AsyncParsableCommand {
           help: "start a fresh session instead of continuing the most recent one")
     var new: Bool = false
 
-    func run() async throws {
-        do {
-            try await execute()
-        } catch {
-            throw ExitCode(reportSiftError(error))
-        }
-    }
-
-    private func execute() async throws {
+    func execute() async throws {
         // Parse the deadline first so a bad value fails fast, before
         // any vault unlock or backend startup happens.
         let deadline: Deadline?
@@ -65,32 +57,16 @@ struct AutoCommand: AsyncParsableCommand {
             return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
         }
 
+        let canResume = !new && (leadDir != nil
+            || PiRunner.mostRecentSession(researchDir: researchDir) != nil)
+
         let resolution: PiRunner.SessionResolution
-        if promptText.isEmpty {
-            // REPL: continue active lead, else most recent, unless --new.
-            if !new, let lead = leadDir {
-                resolution = PiRunner.SessionResolution(
-                    sessionDir: lead, resuming: true, staleAge: nil
-                )
-            } else {
-                resolution = PiRunner.resolveSession(
-                    researchDir: researchDir, prompt: nil,
-                    newSession: new, freshSlug: nil
-                )
-            }
-        } else if !new, let lead = leadDir {
-            // Detached run against the active lead.
-            resolution = PiRunner.SessionResolution(
-                sessionDir: lead, resuming: true, staleAge: nil
-            )
-        } else if !new, let last = PiRunner.mostRecentSession(researchDir: researchDir) {
-            // Detached resume.
-            let lastMod = PiRunner.lastModified(of: last)
-            let ageH = (Date().timeIntervalSince1970 - lastMod) / 3600
-            let stale = ageH >= Double(PiRunner.staleSessionHours)
-                ? PiRunner.formatAge(ageH) : nil
-            resolution = PiRunner.SessionResolution(
-                sessionDir: last, resuming: true, staleAge: stale
+        if promptText.isEmpty || canResume {
+            // REPL, or detached run that should land on an existing
+            // session — let PiRunner pick lead → most-recent → default.
+            resolution = PiRunner.resolveSession(
+                researchDir: researchDir, prompt: nil,
+                newSession: new, leadDir: leadDir
             )
         } else {
             // New detached session — name it via AI slug (or regex fallback).
@@ -106,9 +82,7 @@ struct AutoCommand: AsyncParsableCommand {
 
         // Foreground REPL.
         if promptText.isEmpty {
-            FileHandle.standardError.write(Data(
-                "[auto]     session: \(resolution.sessionDir.lastPathComponent)\n".utf8
-            ))
+            Log.say("auto", "session: \(resolution.sessionDir.lastPathComponent)")
             let prelaunch = try await PiRunner.prepare(
                 sessionDir: resolution.sessionDir, resuming: resolution.resuming,
                 deadline: deadline, skillDir: skillDir()
@@ -121,14 +95,11 @@ struct AutoCommand: AsyncParsableCommand {
 
         // Detached one-shot.
         if resolution.resuming {
+            let session = resolution.sessionDir.lastPathComponent
             if let stale = resolution.staleAge {
-                FileHandle.standardError.write(Data(
-                    "[auto]     resuming \(resolution.sessionDir.lastPathComponent) (\(stale) since last activity — pass --new if this is a different investigation)\n".utf8
-                ))
+                Log.say("auto", "resuming \(session) (\(stale) since last activity — pass --new if this is a different investigation)")
             } else {
-                FileHandle.standardError.write(Data(
-                    "[auto]     resuming \(resolution.sessionDir.lastPathComponent)\n".utf8
-                ))
+                Log.say("auto", "resuming \(session)")
             }
         }
 
@@ -218,9 +189,7 @@ struct AutoCommand: AsyncParsableCommand {
         }
 
         let session = sessionDir.lastPathComponent
-        FileHandle.standardError.write(Data(
-            "[auto]     started \(session) (pid \(pid))\n".utf8
-        ))
+        Log.say("auto", "started \(session) (pid \(pid))")
         FileHandle.standardError.write(Data(
             "  → live progress: menu bar item, or `sift status` / `sift logs -f`\n".utf8
         ))

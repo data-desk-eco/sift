@@ -31,14 +31,13 @@ public final class VaultService: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    public struct InitResult: Sendable {
-        public let mountpoint: URL
-        public let passphrase: String
-    }
-
-    /// Create the sparseimage and mount it. Stores the passphrase in
-    /// Keychain. Throws if a vault already exists.
-    public func initialize(size: String = defaultSize) throws -> InitResult {
+    /// Create the sparseimage, mount it, and stash the passphrase in
+    /// Keychain. Returns the mountpoint. Throws if a vault already
+    /// exists. The passphrase is intentionally NOT returned: callers
+    /// don't need it (Keychain holds it for unlocks), and not handing
+    /// it back means it can't be accidentally logged or printed.
+    @discardableResult
+    public func initialize(size: String = defaultSize) throws -> URL {
         if isCreated {
             throw SiftError(
                 "vault already exists at \(sparseimagePath.path)",
@@ -47,7 +46,7 @@ public final class VaultService: @unchecked Sendable {
         }
         try Paths.ensure(projectDir)
 
-        let passphrase = Self.randomPassphrase()
+        let passphrase = try Self.randomPassphrase()
         let stem = sparseimagePath.deletingPathExtension().path
 
         try Subprocess.check(
@@ -66,7 +65,7 @@ public final class VaultService: @unchecked Sendable {
             input: passphrase
         )
         try Paths.ensure(defaultMountpoint.appending(path: "research"))
-        return InitResult(mountpoint: defaultMountpoint, passphrase: passphrase)
+        return defaultMountpoint
     }
 
     /// Mount the vault if not already mounted. Touch-ID gated.
@@ -142,9 +141,11 @@ public final class VaultService: @unchecked Sendable {
         return dir
     }
 
-    static func randomPassphrase() -> String {
+    static func randomPassphrase() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw SiftError("system RNG failed; refusing to create vault with weak passphrase")
+        }
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 }

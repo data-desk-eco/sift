@@ -145,7 +145,7 @@ public enum Render {
 // MARK: - Table renderer
 
 /// Borderless `simple` table — column-aligned, header underlined with
-/// dashes, no other rules. Matches Python's tabulate(tablefmt="simple").
+/// dashes, no other rules.
 public enum Table {
     public static func render(_ rows: [[String]], headers: [String]) -> String {
         guard !headers.isEmpty else { return "" }

@@ -153,7 +153,7 @@ public enum Backend {
         guard config.kind == .local else { return }
         let port = config.port ?? defaultLocalPort
         if healthCheck(port: port) {
-            FileHandle.standardError.write(Data("[server]   already up on :\(port)\n".utf8))
+            Log.say("server", "already up on :\(port)")
             return
         }
         let modelPath = Paths.modelsDir.appending(path: config.modelFile ?? defaultModelFile)
@@ -165,15 +165,14 @@ public enum Backend {
         }
         let logPath = Paths.siftHome.appending(path: "llama-server.log")
         let pidPath = Paths.siftHome.appending(path: "llama-server.pid")
-        FileHandle.standardError.write(Data("[server]   starting llama-server on :\(port)\n".utf8))
+        Log.say("server", "starting llama-server on :\(port)")
 
-        if !FileManager.default.fileExists(atPath: logPath.path) {
-            FileManager.default.createFile(atPath: logPath.path, contents: nil)
-        }
-        guard let logHandle = try? FileHandle(forWritingTo: logPath) else {
+        let logHandle: FileHandle
+        do {
+            logHandle = try RotatingLog.openForAppend(at: logPath)
+        } catch {
             throw SiftError("can't write to \(logPath.path)")
         }
-        try logHandle.seekToEnd()
 
         let proc = Process()
         proc.executableURL = URL(filePath: try resolveExecutable("llama-server"))
@@ -189,18 +188,33 @@ public enum Backend {
         ]
         proc.standardOutput = logHandle
         proc.standardError = logHandle
-        // Detach the new process from our session so it survives our exit.
-        // This is the analogue of Python's start_new_session=True.
+        // Process inherits our session by default; that's fine here
+        // because llama-server outlives the CLI naturally — the daemon
+        // (or the user re-running `sift auto`) is the long-lived parent.
         try proc.run()
         try? Data(String(proc.processIdentifier).utf8).write(to: pidPath)
 
         for _ in 0..<120 {
             Thread.sleep(forTimeInterval: 1.0)
             if healthCheck(port: port) {
-                FileHandle.standardError.write(Data("[server]   ready\n".utf8))
+                Log.say("server", "ready")
                 return
             }
         }
+        // Health check timed out — kill the unhealthy process so a
+        // retry isn't blocked by a stale port. Without this, the
+        // orphaned llama-server keeps holding :1234 (and ~14 GB) and
+        // every subsequent `sift auto` greets the user with "address
+        // already in use".
+        proc.terminate()
+        for _ in 0..<10 {
+            usleep(200_000)
+            if !proc.isRunning { break }
+        }
+        if proc.isRunning {
+            kill(proc.processIdentifier, SIGKILL)
+        }
+        try? FileManager.default.removeItem(at: pidPath)
         throw SiftError(
             "llama-server didn't become ready in 120s",
             suggestion: "check \(logPath.path)"
@@ -230,9 +244,7 @@ public enum Backend {
               let pid = pid_t(raw),
               kill(pid, 0) == 0
         else { return }
-        FileHandle.standardError.write(Data(
-            "[server]   stopping llama-server (pid \(pid))\n".utf8
-        ))
+        Log.say("server", "stopping llama-server (pid \(pid))")
         kill(pid, SIGTERM)
         // Give it ~2s to exit cleanly, then SIGKILL if still around.
         for _ in 0..<10 {
@@ -260,7 +272,7 @@ public enum Backend {
                 suggestion: "install Homebrew or install llama.cpp manually"
             )
         }
-        FileHandle.standardError.write(Data("[init]     installing llama.cpp via Homebrew\n".utf8))
+        Log.say("init", "installing llama.cpp via Homebrew")
         try Subprocess.check(["/usr/bin/env", "brew", "install", "llama.cpp"])
     }
 
@@ -271,10 +283,10 @@ public enum Backend {
         try Paths.ensure(Paths.modelsDir)
         let modelPath = Paths.modelsDir.appending(path: defaultModelFile)
         if FileManager.default.fileExists(atPath: modelPath.path) {
-            FileHandle.standardError.write(Data("[init]     model already downloaded\n".utf8))
+            Log.say("init", "model already downloaded")
             return
         }
-        FileHandle.standardError.write(Data("[init]     downloading model (~12 GB)\n".utf8))
+        Log.say("init", "downloading model (~12 GB)")
 
         let resolveURL = "https://huggingface.co/\(defaultModelRepo)/resolve/main/\(defaultModelFile)"
         let resolved = try resolveRedirect(resolveURL)
@@ -323,11 +335,23 @@ public enum Backend {
     }
 
     /// Follow HEAD redirects manually so curl downloads the resolved URL
-    /// (HF gives a CDN-signed URL via 302).
+    /// (HF gives a CDN-signed URL via 302). Refuses any redirect that
+    /// downgrades to plaintext or jumps to a non-http(s) scheme — a
+    /// malicious or compromised redirect target shouldn't be able to
+    /// trick us into downloading a 12 GB model over an unauthenticated
+    /// channel.
     private static func resolveRedirect(_ url: String) throws -> String {
         var current = url
         for _ in 0..<5 {
-            guard let u = URL(string: current) else { break }
+            guard let u = URL(string: current),
+                  let scheme = u.scheme?.lowercased(),
+                  scheme == "https"
+            else {
+                throw SiftError(
+                    "refusing non-https model URL: \(current)",
+                    suggestion: "model downloads must come over HTTPS"
+                )
+            }
             var request = URLRequest(url: u)
             request.httpMethod = "HEAD"
             request.timeoutInterval = 30

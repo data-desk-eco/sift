@@ -3,7 +3,7 @@ import ArgumentParser
 import Foundation
 import SiftCore
 
-struct ExportCommand: AsyncParsableCommand {
+struct ExportCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "export",
         abstract: "Render report.md → report.html with alias→Aleph entity links.",
@@ -32,49 +32,45 @@ struct ExportCommand: AsyncParsableCommand {
     @Flag(help: "show a macOS share sheet instead of opening in browser")
     var share: Bool = false
 
-    func run() async throws {
-        do {
-            let srcURL = try resolveSource()
-            let dstURL: URL
-            if let outPath = out {
-                dstURL = URL(filePath: (outPath as NSString).expandingTildeInPath)
-            } else {
-                dstURL = srcURL.deletingPathExtension().appendingPathExtension("html")
-            }
+    func execute() async throws {
+        let srcURL = try resolveSource()
+        let dstURL: URL
+        if let outPath = out {
+            dstURL = URL(filePath: (outPath as NSString).expandingTildeInPath)
+        } else {
+            dstURL = srcURL.deletingPathExtension().appendingPathExtension("html")
+        }
 
-            let serverURL: String
-            if let s = server, !s.isEmpty {
-                serverURL = s
-            } else if let s = Keychain.get(Keychain.Key.alephURL), !s.isEmpty {
-                serverURL = s
-            } else {
-                throw SiftError(
-                    "no Aleph server URL — can't build entity links",
-                    suggestion: "pass --server https://aleph.example.org or store with 'sift vault set ALEPH_URL ...'"
-                )
-            }
-
-            let store = try openSessionStore()
-            let counts = try Report.export(
-                src: srcURL, dst: dstURL,
-                store: store, defaultServer: serverURL
+        let serverURL: String
+        if let s = server, !s.isEmpty {
+            serverURL = s
+        } else if let s = Keychain.get(Keychain.Key.alephURL), !s.isEmpty {
+            serverURL = s
+        } else {
+            throw SiftError(
+                "no Aleph server URL — can't build entity links",
+                suggestion: "pass --server https://aleph.example.org or store with 'sift vault set ALEPH_URL ...'"
             )
+        }
 
-            var msg = "[export]   \(srcURL.path) → \(dstURL.path)  (\(counts.linked) aliases linked"
-            if counts.unresolved > 0 { msg += ", \(counts.unresolved) unresolved" }
-            msg += ")"
-            print(msg)
+        let store = try openSessionStore()
+        let counts = try Report.export(
+            src: srcURL, dst: dstURL,
+            store: store, defaultServer: serverURL
+        )
 
-            // Set Spotlight metadata so the report is searchable from Finder.
-            applySpotlight(to: dstURL, src: srcURL)
+        var msg = "[export]   \(srcURL.path) → \(dstURL.path)  (\(counts.linked) aliases linked"
+        if counts.unresolved > 0 { msg += ", \(counts.unresolved) unresolved" }
+        msg += ")"
+        print(msg)
 
-            if share {
-                showShareSheet(for: dstURL)
-            } else if !noOpen {
-                NSWorkspace.shared.open(dstURL)
-            }
-        } catch {
-            throw ExitCode(reportSiftError(error))
+        // Set Spotlight metadata so the report is searchable from Finder.
+        applySpotlight(to: dstURL, src: srcURL)
+
+        if share {
+            showShareSheet(for: dstURL)
+        } else if !noOpen {
+            NSWorkspace.shared.open(dstURL)
         }
     }
 
@@ -153,8 +149,6 @@ struct ExportCommand: AsyncParsableCommand {
         pboard.clearContents()
         pboard.writeObjects([url as NSURL])
         NSWorkspace.shared.activateFileViewerSelecting([url])
-        FileHandle.standardError.write(Data(
-            "[export]   path copied to clipboard; opened in Finder for sharing\n".utf8
-        ))
+        Log.say("export", "path copied to clipboard; opened in Finder for sharing")
     }
 }

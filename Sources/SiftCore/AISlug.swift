@@ -13,51 +13,51 @@ public enum AISlug {
         if let aiSlug = await callBackend(prompt: prompt, timeout: timeout), !aiSlug.isEmpty {
             return aiSlug
         }
-        FileHandle.standardError.write(Data(
-            "[slug]     LLM unavailable or slow — using regex slug\n".utf8
-        ))
+        Log.say("slug", "LLM unavailable or slow — using regex slug")
         return regexSlug(prompt)
     }
 
     static func regexSlug(_ prompt: String) -> String {
-        let lowered = prompt.lowercased()
-        var slug = ""
-        for ch in lowered {
-            if ch.isLetter || ch.isNumber {
-                slug.append(ch)
-            } else if !slug.isEmpty, slug.last != "-" {
-                slug.append("-")
-            }
-        }
-        while slug.hasSuffix("-") { slug.removeLast() }
-        return String(slug.prefix(40))
+        kebabify(prompt, allowHyphen: false, maxLength: 40)
     }
 
     static func sanitize(_ raw: String) -> String {
+        // Strip any <think>…</think> reasoning blocks the model leaked
+        // (Qwen3 normally honours `/no_think` but isn't 100% reliable).
         var text = raw
-        // strip <think>...</think> blocks
         if let re = try? NSRegularExpression(
             pattern: "<think>.*?</think>", options: .dotMatchesLineSeparators
         ) {
             let range = NSRange(text.startIndex..., in: text)
             text = re.stringByReplacingMatches(in: text, range: range, withTemplate: "")
         }
-        let lines = text.split(whereSeparator: { $0.isNewline }).map { String($0) }
-        guard let last = lines.map({ $0.trimmingCharacters(in: .whitespaces) })
+        // Take the last non-empty line — the slug instruction tells the
+        // model "Output ONLY the slug on the final line."
+        guard let last = text.split(whereSeparator: { $0.isNewline })
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
             .last(where: { !$0.isEmpty }) else { return "" }
-        let candidate = last
-            .trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
-            .lowercased()
+        let stripped = last.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        return kebabify(stripped, allowHyphen: true, maxLength: 50)
+    }
+
+    /// Lowercase, alpha-numerics + (optionally) embedded hyphens; runs
+    /// of other characters collapse to a single `-`. Truncated to
+    /// `maxLength`, then leading/trailing hyphens stripped — order
+    /// matters: a 40-char prefix that lands mid-word would otherwise
+    /// leave a trailing `-`.
+    static func kebabify(_ raw: String, allowHyphen: Bool, maxLength: Int) -> String {
         var slug = ""
-        for ch in candidate {
-            if ch.isLetter || ch.isNumber || ch == "-" {
+        for ch in raw.lowercased() {
+            if ch.isLetter || ch.isNumber || (allowHyphen && ch == "-") {
                 slug.append(ch)
             } else if !slug.isEmpty, slug.last != "-" {
                 slug.append("-")
             }
         }
+        slug = String(slug.prefix(maxLength))
         while slug.hasSuffix("-") { slug.removeLast() }
-        return String(slug.prefix(50))
+        while slug.hasPrefix("-") { slug.removeFirst() }
+        return slug
     }
 
     private static func callBackend(

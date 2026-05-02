@@ -47,6 +47,10 @@ make install
 
 This is the contributor / dev path. `make install` builds, ad-hoc signs, and drops the CLI in `~/.local/bin/sift` and the app in `/Applications/Sift.app`. `make uninstall` reverses it; your vault under `~/.sift/` is preserved.
 
+`make test` runs the test suite — uses [swift-testing](https://github.com/swiftlang/swift-testing) so it works with Command Line Tools alone (no Xcode required). CI runs the same target on every PR.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for a tour of the codebase and [`CHANGELOG.md`](CHANGELOG.md) for release notes.
+
 ## License
 
 MIT.

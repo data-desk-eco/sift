@@ -1,23 +1,23 @@
 import Foundation
-import XCTest
+import Testing
 @testable import SiftCore
 
-final class AlephClientTests: XCTestCase {
+@Suite struct AlephClientNormalizeTests {
 
-    func testAppendsApiVersionWhenMissing() {
-        XCTAssertEqual(AlephClient.normalize("https://aleph.occrp.org"), "https://aleph.occrp.org/api/2")
-        XCTAssertEqual(AlephClient.normalize("https://aleph.example.org/"), "https://aleph.example.org/api/2")
+    @Test func appendsApiVersionWhenMissing() {
+        #expect(AlephClient.normalize("https://aleph.occrp.org") == "https://aleph.occrp.org/api/2")
+        #expect(AlephClient.normalize("https://aleph.example.org/") == "https://aleph.example.org/api/2")
     }
 
-    func testLeavesExistingApiPath() {
-        XCTAssertEqual(AlephClient.normalize("https://aleph.occrp.org/api/2"), "https://aleph.occrp.org/api/2")
-        XCTAssertEqual(AlephClient.normalize("https://aleph.example.org/api/v3"), "https://aleph.example.org/api/v3")
+    @Test func leavesExistingApiPath() {
+        #expect(AlephClient.normalize("https://aleph.occrp.org/api/2") == "https://aleph.occrp.org/api/2")
+        #expect(AlephClient.normalize("https://aleph.example.org/api/v3") == "https://aleph.example.org/api/v3")
     }
 
-    func testDeriveServerNameStripsGenericPrefixes() {
-        XCTAssertEqual(AlephClient.deriveServerName(from: "https://aleph.occrp.org/api/2"), "occrp")
-        XCTAssertEqual(AlephClient.deriveServerName(from: "https://search.libraryofleaks.org/api/2"), "libraryofleaks")
-        XCTAssertEqual(AlephClient.deriveServerName(from: "https://www.example.com"), "example")
-        XCTAssertEqual(AlephClient.deriveServerName(from: "https://example.com"), "example")
+    @Test func deriveServerNameStripsGenericPrefixes() {
+        #expect(AlephClient.deriveServerName(from: "https://aleph.occrp.org/api/2") == "occrp")
+        #expect(AlephClient.deriveServerName(from: "https://search.libraryofleaks.org/api/2") == "libraryofleaks")
+        #expect(AlephClient.deriveServerName(from: "https://www.example.com") == "example")
+        #expect(AlephClient.deriveServerName(from: "https://example.com") == "example")
     }
 }

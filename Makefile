@@ -26,7 +26,7 @@ SUPPORT_DIR := $(HOME)/Library/Application Support/Sift
 PI_DIR := $(SUPPORT_DIR)/pi
 PI_PACKAGE := @mariozechner/pi-coding-agent
 
-.PHONY: all build cli app bundle codesign install install-cli install-app install-pi uninstall run clean release release-bundle release-codesign release-zip print-version
+.PHONY: all build cli app bundle codesign install install-cli install-app install-pi uninstall run clean release release-bundle release-codesign release-zip print-version test
 
 all: build
 
@@ -100,6 +100,16 @@ run: install-cli
 clean:
 	swift package clean
 	rm -rf $(APP_BUNDLE) $(RELEASE_DIR)
+
+# Tests use swift-testing (pulled as an SPM dep) — works on Command
+# Line Tools alone, no Xcode required. SIFT_HOME is pinned to a temp
+# path so anything touching Paths.siftHome can't see real vault state
+# (and so the project's vault-guard hook doesn't reject the run).
+# --no-parallel: several suites mutate process-wide state (SIFT_HOME,
+# stderr fd, URLProtocol stub queue). Cross-suite parallelism races on
+# those. The whole suite runs in <100 ms anyway.
+test:
+	SIFT_HOME=$(shell mktemp -d -t sift-test) swift test --no-parallel
 
 print-version:
 	@echo $(VERSION)

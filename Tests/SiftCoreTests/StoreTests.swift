@@ -1,8 +1,8 @@
 import Foundation
-import XCTest
+import Testing
 @testable import SiftCore
 
-final class StoreTests: XCTestCase {
+@Suite struct StoreTests {
 
     private func tempStore() throws -> (Store, URL) {
         let dir = FileManager.default.temporaryDirectory
@@ -12,7 +12,7 @@ final class StoreTests: XCTestCase {
         return (store, dir)
     }
 
-    func testAliasAssignmentIsStable() throws {
+    @Test func aliasAssignmentIsStable() throws {
         let (store, dir) = try tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -20,17 +20,17 @@ final class StoreTests: XCTestCase {
             eid: "ent-1", schema: "Thing", caption: nil, name: "Thing One",
             properties: nil, collectionId: nil, server: nil, fullBody: false
         )
-        XCTAssertEqual(try store.assignAlias("ent-1"), "r1")
-        XCTAssertEqual(try store.assignAlias("ent-1"), "r1")  // idempotent
+        #expect(try store.assignAlias("ent-1") == "r1")
+        #expect(try store.assignAlias("ent-1") == "r1")  // idempotent
 
         try store.remember(
             eid: "ent-2", schema: "Thing", caption: nil, name: "Thing Two",
             properties: nil, collectionId: nil, server: nil, fullBody: false
         )
-        XCTAssertEqual(try store.assignAlias("ent-2"), "r2")
+        #expect(try store.assignAlias("ent-2") == "r2")
     }
 
-    func testResolveAliasRoundTrip() throws {
+    @Test func resolveAliasRoundTrip() throws {
         let (store, dir) = try tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -39,22 +39,22 @@ final class StoreTests: XCTestCase {
             properties: nil, collectionId: nil, server: nil, fullBody: false
         )
         let alias = try store.assignAlias("ent-99")
-        XCTAssertEqual(try store.resolveAlias(alias), "ent-99")
+        #expect(try store.resolveAlias(alias) == "ent-99")
     }
 
-    func testResolveAliasFailsForUnknown() throws {
+    @Test func resolveAliasFailsForUnknown() throws {
         let (store, dir) = try tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        XCTAssertThrowsError(try store.resolveAlias("r99"))
+        #expect(throws: SiftError.self) { try store.resolveAlias("r99") }
     }
 
-    func testResolveAliasPassesThroughNonAliasIds() throws {
+    @Test func resolveAliasPassesThroughNonAliasIds() throws {
         let (store, dir) = try tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
-        XCTAssertEqual(try store.resolveAlias("ent-abc"), "ent-abc")
+        #expect(try store.resolveAlias("ent-abc") == "ent-abc")
     }
 
-    func testCacheRoundTrip() throws {
+    @Test func cacheRoundTrip() throws {
         let (store, dir) = try tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -62,10 +62,10 @@ final class StoreTests: XCTestCase {
         let payload: [String: Any] = ["results": [["id": "ent-1"]], "total": 1]
         try store.cacheSet(key, payload)
         let hit = try store.cacheGet(key)
-        XCTAssertEqual(hit?["total"] as? Int, 1)
+        #expect(hit?["total"] as? Int == 1)
     }
 
-    func testSeeEntityIngestsNestedRefs() throws {
+    @Test func seeEntityIngestsNestedRefs() throws {
         let (store, dir) = try tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -86,11 +86,11 @@ final class StoreTests: XCTestCase {
             store: store, entity: entity,
             server: "test", collectionId: "col-1", fullBody: true
         )
-        XCTAssertEqual(alias, "r1")
-        XCTAssertEqual(try store.aliasFor("person-1"), "r2")
-        XCTAssertEqual(try store.aliasFor("org-1"), "r3")
+        #expect(alias == "r1")
+        #expect(try store.aliasFor("person-1") == "r2")
+        #expect(try store.aliasFor("org-1") == "r3")
         let stub = try store.getEntity("doc-1")
-        XCTAssertEqual(stub?.hasFullBody, true)
-        XCTAssertEqual(stub?.collectionId, "col-1")
+        #expect(stub?.hasFullBody == true)
+        #expect(stub?.collectionId == "col-1")
     }
 }

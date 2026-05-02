@@ -3,6 +3,16 @@ import Foundation
 public enum Sift {
     public static let version = "0.1.0"
 
+    /// Conservative single-quote shell quoting. Pass-through for tokens
+    /// that match `[A-Za-z0-9_./-]+`; otherwise wraps in single quotes
+    /// and escapes embedded apostrophes the POSIX way.
+    public static func shellQuote(_ value: String) -> String {
+        if value.range(of: #"^[A-Za-z0-9_./-]+$"#, options: .regularExpression) != nil {
+            return value
+        }
+        return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// Quick check used by `ensureInitialized()`.
     public static var isInitialized: Bool {
         FileManager.default.fileExists(atPath: Paths.initMarker.path)
@@ -40,6 +50,6 @@ public enum Sift {
                 suggestion: "run 'sift init' or 'sift vault set ALEPH_API_KEY ...'"
             )
         }
-        return AlephClient(baseURL: url, apiKey: key)
+        return try AlephClient(baseURL: url, apiKey: key)
     }
 }

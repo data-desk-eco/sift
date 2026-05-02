@@ -71,17 +71,7 @@ public enum Paths {
            FileManager.default.isExecutableFile(atPath: bundled) {
             return bundled
         }
-        // Fall back to PATH.
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else {
-            return nil
-        }
-        for dir in path.split(separator: ":") {
-            let candidate = "\(dir)/\(name)"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
+        return Subprocess.which(name)
     }
 
     public static func ensureSiftHome() throws {

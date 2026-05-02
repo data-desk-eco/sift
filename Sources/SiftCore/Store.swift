@@ -5,8 +5,9 @@ import SQLite3
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /// SQLite-backed store: aliases (`r1`, `r2`, …), entity blobs cached
-/// in FtM shape, the response cache, and the property-edge graph. Same
-/// schema as sift's Python store; one DB per session.
+/// in FtM shape, the response cache, and the property-edge graph. One
+/// DB per vault, shared across every session on it (so aliases and
+/// the entity cache survive across investigations).
 ///
 /// Connections are not Sendable. Build one per task / queue.
 public final class Store {
@@ -305,7 +306,7 @@ public final class Store {
 
     public var connection: OpaquePointer? { db }
 
-    // MARK: - Edge iteration (mirror of Python iter_property_edges)
+    // MARK: - Edge iteration
 
     struct Edge { let prop: String; let dst: String }
 
