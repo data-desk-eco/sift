@@ -10,7 +10,8 @@ import Testing
 
 @Suite(.serialized) struct SourcesCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func listsCollections() async throws {
         StubURLProtocol.enqueueJSON("""
@@ -69,7 +70,8 @@ import Testing
 
 @Suite(.serialized) struct SearchCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func returnsResultsAndAssignsAliases() async throws {
         StubURLProtocol.enqueueJSON("""
@@ -160,7 +162,8 @@ import Testing
 
 @Suite(.serialized) struct ReadCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func fetchesAndRendersBody() async throws {
         StubURLProtocol.enqueueJSON("""
@@ -247,7 +250,8 @@ import Testing
 
 @Suite(.serialized) struct ExpandCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func partyEntityReturnsCountsOnly() async throws {
         StubURLProtocol.enqueueJSON("""
@@ -305,7 +309,8 @@ import Testing
 
 @Suite(.serialized) struct SimilarCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func partySimilarityReturnsScoredCandidates() async throws {
         StubURLProtocol.enqueueJSON("""
@@ -354,7 +359,8 @@ import Testing
 
 @Suite(.serialized) struct HubsCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func reportsTopFacets() async throws {
         StubURLProtocol.enqueueJSON("""
@@ -407,7 +413,8 @@ import Testing
 
 @Suite(.serialized) struct TreeCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func nonFolderAliasRejected() async throws {
         let (store, dir) = try tempStore(label: "tree")
@@ -469,7 +476,8 @@ import Testing
 
 @Suite(.serialized) struct BrowseCommandTests {
 
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
+
 
     @Test func folderEntityListsDirectChildren() async throws {
         // /entities/folder-1/ is what runBrowse fetches first via

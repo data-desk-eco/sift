@@ -48,19 +48,6 @@ import Testing
 /// returns local fixtures so we don't depend on `Bundle.module`.
 @Suite(.serialized) struct SystemPromptBuildTests {
 
-    private func withTempHome(_ block: (URL) throws -> Void) throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appending(path: "sift-prompt-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let prior = ProcessInfo.processInfo.environment["SIFT_HOME"]
-        setenv("SIFT_HOME", dir.path, 1)
-        defer {
-            if let prior { setenv("SIFT_HOME", prior, 1) } else { unsetenv("SIFT_HOME") }
-            try? FileManager.default.removeItem(at: dir)
-        }
-        try block(dir)
-    }
-
     @Test func combinesAgentsAndSkillFiles() throws {
         try withTempHome { _ in
             let tmp = FileManager.default.temporaryDirectory
@@ -107,8 +94,8 @@ import Testing
         }
     }
 
-    @Test func throwsWhenResourcesAreMissing() throws {
-        try withTempHome { _ in
+    @Test func throwsWhenResourcesAreMissing() {
+        withTempHome { _ in
             SystemPrompt.resourceFinder = { .init(agentsMD: nil, skillMD: nil) }
             #expect(throws: SiftError.self) {
                 _ = try SystemPrompt.build()

@@ -4,11 +4,11 @@ import Testing
 
 private func body(_ json: String) -> Data { Data(json.utf8) }
 
-/// Tests share a stub queue, so they run serialised — `.serialized`
-/// guarantees no two run concurrently within the suite.
+/// Tests share the global stub queue. `StubScope` (in TestSupport) is
+/// constructed per-test by swift-testing and acquires the process-wide
+/// lock + resets the queue, so concurrent suites can't pop our stubs.
 @Suite(.serialized) struct AlephClientRetryTests {
-
-    init() { StubURLProtocol.reset() }
+    let scope = StubScope()
 
     @Test func rejectsNonHTTPScheme() {
         #expect(throws: SiftError.self) {

@@ -4,21 +4,8 @@ import Testing
 
 @Suite(.serialized) struct BackendConfigTests {
 
-    private func withTempHome(_ block: () throws -> Void) rethrows {
-        let dir = FileManager.default.temporaryDirectory
-            .appending(path: "sift-backend-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let prior = ProcessInfo.processInfo.environment["SIFT_HOME"]
-        setenv("SIFT_HOME", dir.path, 1)
-        defer {
-            if let prior { setenv("SIFT_HOME", prior, 1) } else { unsetenv("SIFT_HOME") }
-            try? FileManager.default.removeItem(at: dir)
-        }
-        try block()
-    }
-
     @Test func writeReadRoundTripsLocal() throws {
-        try withTempHome {
+        try withTempHome { _ in
             try Backend.writeLocal()
             let config = try Backend.requireConfig()
             #expect(config.kind == .local)
@@ -28,13 +15,13 @@ import Testing
     }
 
     @Test func readReturnsNilWhenAbsent() {
-        withTempHome {
+        withTempHome { _ in
             #expect(Backend.readConfig() == nil)
         }
     }
 
     @Test func requireConfigThrowsWhenAbsent() {
-        withTempHome {
+        withTempHome { _ in
             #expect(throws: SiftError.self) {
                 _ = try Backend.requireConfig()
             }
@@ -55,7 +42,7 @@ import Testing
     }
 
     @Test func writeConfigSetsPosix600() throws {
-        try withTempHome {
+        try withTempHome { _ in
             try Backend.writeLocal()
             let attrs = try FileManager.default.attributesOfItem(
                 atPath: Backend.configPath.path

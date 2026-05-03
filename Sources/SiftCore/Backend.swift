@@ -153,8 +153,19 @@ public enum Backend {
         guard config.kind == .local else { return }
         let port = config.port ?? defaultLocalPort
         if healthCheck(port: port) {
-            Log.say("server", "already up on :\(port)")
-            return
+            // A long-lived llama-server accumulates KV cache state and
+            // gets progressively slower — second-and-later auto sessions
+            // were taking minutes to produce their first token. If no
+            // other auto session is currently using it, kill the stale
+            // server so this run gets a clean boot. Concurrent sessions
+            // (rare) still share the warm one.
+            if RunRegistry.active().isEmpty {
+                Log.say("server", "recycling stale llama-server on :\(port)")
+                stopLocal()
+            } else {
+                Log.say("server", "already up on :\(port)")
+                return
+            }
         }
         let modelPath = Paths.modelsDir.appending(path: config.modelFile ?? defaultModelFile)
         guard FileManager.default.fileExists(atPath: modelPath.path) else {

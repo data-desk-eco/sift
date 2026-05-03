@@ -79,14 +79,21 @@ public enum RunRegistry {
         return state
     }
 
-    /// All run-state files, sorted by start time (newest first).
+    /// All run-state files, sorted by start time (newest first). Entries
+    /// whose session directory no longer exists on disk are dropped — the
+    /// run-state JSON outlives the vault that produced it (it lives under
+    /// `~/.sift/run/`), so swapping vaults would otherwise leave ghost
+    /// leads in the menu bar / `sift status` pointing at paths that
+    /// aren't there. Filesystem presence is the source of truth.
     public static func list() -> [RunState] {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: Paths.runDir, includingPropertiesForKeys: nil
         ) else { return [] }
+        let fm = FileManager.default
         return entries
             .filter { $0.pathExtension == "json" }
             .compactMap { read(at: $0) }
+            .filter { fm.fileExists(atPath: $0.sessionDir) }
             .sorted { $0.startedAt > $1.startedAt }
     }
 

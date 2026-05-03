@@ -2,25 +2,9 @@ import Foundation
 import Testing
 @testable import SiftCore
 
-/// `Session.dbPath()` reads env vars, so tests must not race each
-/// other on `setenv`.
+/// `Session.dbPath()` reads env vars. `withEnv` (in TestSupport) holds
+/// a process-wide lock so concurrent suites can't race on setenv.
 @Suite(.serialized) struct SessionTests {
-
-    private func withEnv<T>(_ overrides: [String: String?], _ block: () throws -> T) rethrows -> T {
-        var prior: [String: String?] = [:]
-        for (k, _) in overrides {
-            prior[k] = ProcessInfo.processInfo.environment[k]
-        }
-        for (k, v) in overrides {
-            if let v { setenv(k, v, 1) } else { unsetenv(k) }
-        }
-        defer {
-            for (k, v) in prior {
-                if let v { setenv(k, v, 1) } else { unsetenv(k) }
-            }
-        }
-        return try block()
-    }
 
     @Test func usesAlephDbPathOverride() throws {
         let path = try withEnv([

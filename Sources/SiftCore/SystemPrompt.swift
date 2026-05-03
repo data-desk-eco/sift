@@ -55,10 +55,16 @@ public enum SystemPrompt {
             parts.append("\n\n## Deadline\n\n")
             parts.append(
                 "This session has a soft deadline of \(dl.totalMinutes) minute(s), "
-                + "ending around \(dl.endLocalTime) local time. After every few "
+                + "ending around \(dl.endLocalTime) local time. The budget is a "
+                + "target depth, not a cap to finish under — the user picked it "
+                + "because they want roughly that much investigation. If you find "
+                + "yourself ready to stop with substantial time left, you've "
+                + "almost certainly stopped too early: re-read sources you skimmed, "
+                + "verify findings against fresh searches, broaden the question, "
+                + "or pursue leads you noted but didn't follow. After every few "
                 + "tool calls, run `sift time` to see remaining time and pacing "
-                + "guidance, and adjust depth accordingly. The deadline is soft — "
-                + "there's no hard kill — but report.md must exist by the time you stop."
+                + "guidance. The deadline itself is soft — there's no hard kill — "
+                + "but report.md must exist by the time you stop."
             )
         }
 

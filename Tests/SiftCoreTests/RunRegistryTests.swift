@@ -4,54 +4,48 @@ import Testing
 
 @Suite(.serialized) struct RunRegistryTests {
 
-    private func withTempHome<T>(_ block: () throws -> T) rethrows -> T {
-        let dir = FileManager.default.temporaryDirectory
-            .appending(path: "sift-runreg-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let prior = ProcessInfo.processInfo.environment["SIFT_HOME"]
-        setenv("SIFT_HOME", dir.path, 1)
-        defer {
-            if let prior { setenv("SIFT_HOME", prior, 1) } else { unsetenv("SIFT_HOME") }
-            try? FileManager.default.removeItem(at: dir)
-        }
-        return try block()
-    }
-
-    private func makeState(_ name: String) -> RunState {
-        RunState(
-            session: name, sessionDir: "/tmp/\(name)",
-            logPath: "/tmp/\(name)/auto.log",
+    /// `RunRegistry.list()` filters by sessionDir existence on disk, so
+    /// `makeState` plants a real directory under the test's temp home.
+    /// Cleanup happens automatically when `withTempHome` returns.
+    private func makeState(_ name: String, home: URL) -> RunState {
+        let sessionDir = home.appending(path: "sessions/\(name)")
+        try? FileManager.default.createDirectory(
+            at: sessionDir, withIntermediateDirectories: true
+        )
+        return RunState(
+            session: name, sessionDir: sessionDir.path,
+            logPath: sessionDir.appending(path: "auto.log").path,
             prompt: "test", pid: getpid(),
             startedAt: Int(Date().timeIntervalSince1970)
         )
     }
 
     @Test func writeReadRoundTrip() throws {
-        try withTempHome {
-            try RunRegistry.write(makeState("acme-corp"))
+        try withTempHome { home in
+            try RunRegistry.write(makeState("acme-corp", home: home))
             let read = RunRegistry.read("acme-corp")
             #expect(read?.session == "acme-corp")
             #expect(read?.status == .running)
         }
     }
 
-    @Test func writeRejectsInvalidSessionName() throws {
-        try withTempHome {
+    @Test func writeRejectsInvalidSessionName() {
+        withTempHome { home in
             #expect(throws: SiftError.self) {
-                try RunRegistry.write(makeState("../escape"))
+                try RunRegistry.write(makeState("../escape", home: home))
             }
         }
     }
 
     @Test func readReturnsNilForInvalidName() {
-        withTempHome {
+        withTempHome { _ in
             #expect(RunRegistry.read("../escape") == nil)
             #expect(RunRegistry.read("") == nil)
         }
     }
 
     @Test func readReturnsNilForCorruptJSON() throws {
-        try withTempHome {
+        try withTempHome { _ in
             try Paths.ensure(Paths.runDir)
             let path = Paths.runDir.appending(path: "junk.json")
             try "not json".write(to: path, atomically: true, encoding: .utf8)
@@ -60,7 +54,7 @@ import Testing
     }
 
     @Test func readRejectsTraversalSessionInPayload() throws {
-        try withTempHome {
+        try withTempHome { _ in
             try Paths.ensure(Paths.runDir)
             // Hand-craft a JSON file whose `session` field tries to
             // escape — read() should reject it as malformed.
@@ -77,12 +71,12 @@ import Testing
     }
 
     @Test func listSortsByStartedAtDescending() throws {
-        try withTempHome {
-            var s1 = makeState("first")
+        try withTempHome { home in
+            var s1 = makeState("first", home: home)
             s1.startedAt = 1000
-            var s2 = makeState("second")
+            var s2 = makeState("second", home: home)
             s2.startedAt = 2000
-            var s3 = makeState("third")
+            var s3 = makeState("third", home: home)
             s3.startedAt = 1500
             try RunRegistry.write(s1)
             try RunRegistry.write(s2)
@@ -92,11 +86,25 @@ import Testing
         }
     }
 
+    @Test func listDropsEntriesWhoseSessionDirIsMissing() throws {
+        try withTempHome { home in
+            let live = makeState("alive", home: home)
+            let ghost = makeState("ghost", home: home)
+            try RunRegistry.write(live)
+            try RunRegistry.write(ghost)
+            // Simulate the vault going away (or a different vault being
+            // mounted): the JSON survives, the directory does not.
+            try FileManager.default.removeItem(atPath: ghost.sessionDir)
+            let names = RunRegistry.list().map(\.session)
+            #expect(names == ["alive"])
+        }
+    }
+
     @Test func mostRecentReturnsNewestStartedAt() throws {
-        try withTempHome {
-            var s1 = makeState("old")
+        try withTempHome { home in
+            var s1 = makeState("old", home: home)
             s1.startedAt = 1
-            var s2 = makeState("new")
+            var s2 = makeState("new", home: home)
             s2.startedAt = 9999
             try RunRegistry.write(s1)
             try RunRegistry.write(s2)
@@ -105,8 +113,8 @@ import Testing
     }
 
     @Test func updateMutatesInPlace() throws {
-        try withTempHome {
-            try RunRegistry.write(makeState("acme"))
+        try withTempHome { home in
+            try RunRegistry.write(makeState("acme", home: home))
             try RunRegistry.update("acme") { st in
                 st.lastScope = "tool"
                 st.lastMessage = "search"
@@ -119,8 +127,8 @@ import Testing
     }
 
     @Test func updateIfRunningSkipsTerminalStates() throws {
-        try withTempHome {
-            try RunRegistry.write(makeState("acme"))
+        try withTempHome { home in
+            try RunRegistry.write(makeState("acme", home: home))
             try RunRegistry.update("acme") { $0.status = .stopped }
 
             // Daemon's per-event update arrives after a stop — it must
@@ -136,15 +144,15 @@ import Testing
     }
 
     @Test func updateOnAbsentSessionIsSilent() throws {
-        try withTempHome {
+        try withTempHome { _ in
             // Should not throw when session doesn't exist.
             try RunRegistry.update("nonexistent") { $0.status = .failed }
         }
     }
 
     @Test func removeDeletesFile() throws {
-        try withTempHome {
-            try RunRegistry.write(makeState("acme"))
+        try withTempHome { home in
+            try RunRegistry.write(makeState("acme", home: home))
             #expect(RunRegistry.read("acme") != nil)
             RunRegistry.remove("acme")
             #expect(RunRegistry.read("acme") == nil)

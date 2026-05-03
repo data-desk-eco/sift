@@ -3,25 +3,12 @@ import Testing
 @testable import SiftCore
 
 /// Touches `~/.sift/active-lead`, so SIFT_HOME must point at a temp
-/// dir. The serialised trait keeps these from racing each other (and
-/// any other test) on the shared SIFT_HOME the test runner sets.
+/// dir. `withTempHome` (in TestSupport) holds a process-wide lock so
+/// concurrent suites can't stomp our SIFT_HOME mid-test.
 @Suite(.serialized) struct ActiveLeadTests {
 
-    private func withTempHome<T>(_ block: () throws -> T) rethrows -> T {
-        let dir = FileManager.default.temporaryDirectory
-            .appending(path: "sift-lead-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let prior = ProcessInfo.processInfo.environment["SIFT_HOME"]
-        setenv("SIFT_HOME", dir.path, 1)
-        defer {
-            if let prior { setenv("SIFT_HOME", prior, 1) } else { unsetenv("SIFT_HOME") }
-            try? FileManager.default.removeItem(at: dir)
-        }
-        return try block()
-    }
-
     @Test func roundTripsValidName() {
-        withTempHome {
+        withTempHome { _ in
             #expect(ActiveLead.get() == nil)
             #expect(ActiveLead.set("acme-corp"))
             #expect(ActiveLead.get() == "acme-corp")
@@ -29,7 +16,7 @@ import Testing
     }
 
     @Test func setRejectsInvalidNames() {
-        withTempHome {
+        withTempHome { _ in
             #expect(!ActiveLead.set("../escape"))
             #expect(!ActiveLead.set(""))
             #expect(!ActiveLead.set(".hidden"))
@@ -38,7 +25,7 @@ import Testing
     }
 
     @Test func clearRemovesLead() {
-        withTempHome {
+        withTempHome { _ in
             _ = ActiveLead.set("acme-corp")
             #expect(ActiveLead.clear())
             #expect(ActiveLead.get() == nil)
@@ -46,13 +33,13 @@ import Testing
     }
 
     @Test func clearOnAbsentLeadIsNoOp() {
-        withTempHome {
+        withTempHome { _ in
             #expect(ActiveLead.clear())
         }
     }
 
     @Test func corruptedLeadFileIsTreatedAsAbsent() throws {
-        try withTempHome {
+        try withTempHome { _ in
             // Hand-craft a malicious lead value bypassing `set`.
             let path = Paths.siftHome.appending(path: "active-lead")
             try Paths.ensure(Paths.siftHome)
@@ -62,7 +49,7 @@ import Testing
     }
 
     @Test func setTrimsWhitespace() {
-        withTempHome {
+        withTempHome { _ in
             #expect(ActiveLead.set("  acme-corp\n  "))
             #expect(ActiveLead.get() == "acme-corp")
         }

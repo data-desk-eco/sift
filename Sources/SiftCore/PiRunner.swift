@@ -178,6 +178,17 @@ public enum PiRunner {
             throw SiftError("can't open \(logPath.path) for write")
         }
 
+        // UTC wall-clock prefix for every structured event line so a user
+        // tailing `auto.log` can see when each tool call / state change
+        // landed (and correlate across machines / timezones). Final-text
+        // dumps (the agent's multi-line prose) are written without a
+        // prefix so they read as natural paragraphs.
+        let tsFormatter = DateFormatter()
+        tsFormatter.dateFormat = "HH:mm:ss'Z'"
+        tsFormatter.locale = Locale(identifier: "en_US_POSIX")
+        tsFormatter.timeZone = TimeZone(identifier: "UTC")
+        func stamp() -> String { tsFormatter.string(from: Date()) }
+
         var state = RunState(
             session: prelaunch.session,
             sessionDir: prelaunch.sessionDir.path,
@@ -244,7 +255,10 @@ public enum PiRunner {
                 guard let line = String(data: lineData, encoding: .utf8) else { continue }
                 for event in stream.ingest(line) {
                     if !event.formatted.isEmpty {
-                        if let bytes = (event.formatted + "\n").data(using: .utf8) {
+                        let rendered = event.isFinalText
+                            ? event.formatted + "\n"
+                            : "\(stamp()) \(event.formatted)\n"
+                        if let bytes = rendered.data(using: .utf8) {
                             try? logHandle.write(contentsOf: bytes)
                         }
                     }
@@ -266,7 +280,7 @@ public enum PiRunner {
                 buffer.removeAll(keepingCapacity: false)
                 dropping = true
                 try? logHandle.write(contentsOf: Data(
-                    "[stream]   dropped oversized event line\n".utf8
+                    "\(stamp()) [stream]   dropped oversized event line\n".utf8
                 ))
             }
         }
