@@ -40,6 +40,12 @@ If you need information about the current run (deadline, session dir, available 
 
 Aleph entity IDs are 64-char hashes. The CLI assigns short aliases (`r1`, `r2`, …) to every entity that appears in any tool output, so you can refer to them in subsequent calls. Use the alias as the positional argument: `sift read r5`, `sift expand r5`, etc. The alias table is stored in `$ALEPH_SESSION_DIR/aleph.sqlite` and is shared across every session on the same vault — `r5` in one investigation resolves to the same entity in the next.
 
+## One sift call at a time
+
+Issue sift commands serially, never in parallel batches. Every call writes into the same `aleph.sqlite` (alias assignments, response cache, edge cache); two writes racing will fail one of them with `UNIQUE constraint failed: aliases.n` or a similar SQLite error. Wait for each sift call to return before issuing the next.
+
+If you see that exact error anyway, do not retry the same command in a loop — the alias slot is contested, not broken. Move on with the raw entity ID (the 64-char hash printed alongside the alias) or pick up a different thread of the investigation; the alias will assign cleanly on the next sequential call. Surface persistent failures to the user instead of mashing retry.
+
 ## Research tools
 
 All commands take standard POSIX-style flags: `--limit 20`, `--collection 3843`, `--no-cache`. Short flags `-l`, `-f`, `-r`, `-o` map to `--limit`, `--full`, `--raw`, `--offset`. The natural argument (a query or alias) is positional, so `sift read r5` and `sift search "acme corp"` work without naming it. `sift <cmd> --help` lists every flag for that command.

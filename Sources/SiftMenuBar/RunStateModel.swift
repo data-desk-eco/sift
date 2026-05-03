@@ -3,17 +3,19 @@ import Foundation
 import Observation
 import SiftCore
 
-/// Live view onto the run-state JSON files under `~/.sift/run/`. Driven
-/// by a DispatchSource watcher on the directory; falls back to a 2 s
-/// poll so we don't drop events during quick rotations. Pure read.
+/// Live view onto the per-session sidecars under
+/// `<vault>/research/*/.sift-run.json`. Driven by a DispatchSource
+/// watcher on the research root (re-installed when a vault becomes
+/// available); falls back to a 2 s poll so we don't drop events
+/// during quick rotations or when no vault is mounted yet. Pure read.
 @Observable
 final class RunStateModel {
     private(set) var states: [RunState] = []
     private var watcher: DispatchSourceFileSystemObject?
+    private var watchedPath: String?
     private var pollTimer: DispatchSourceTimer?
 
     init() {
-        try? Paths.ensure(Paths.runDir)
         reload()
         installWatcher()
         installPoller()
@@ -61,6 +63,13 @@ final class RunStateModel {
         let next = RunRegistry.list()
         notifyTransitions(prev: states, next: next)
         states = next
+        // The research dir only becomes reachable after the user
+        // unlocks the vault. Re-install the directory watcher whenever
+        // its target path changes (vault mounted / unmounted / swapped).
+        let target = RunRegistry.researchRoot()?.path
+        if target != watchedPath {
+            installWatcher()
+        }
     }
 
     /// Detect sessions that just transitioned out of `.running` and post
@@ -91,7 +100,11 @@ final class RunStateModel {
     // MARK: - DispatchSource watcher
 
     private func installWatcher() {
-        let fd = open(Paths.runDir.path, O_EVTONLY)
+        watcher?.cancel()
+        watcher = nil
+        watchedPath = nil
+        guard let root = RunRegistry.researchRoot() else { return }
+        let fd = open(root.path, O_EVTONLY)
         guard fd >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
@@ -106,6 +119,7 @@ final class RunStateModel {
         }
         source.resume()
         watcher = source
+        watchedPath = root.path
     }
 
     private func installPoller() {
@@ -135,7 +149,43 @@ final class RunStateModel {
         NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: state.sessionDir)])
     }
 
+    /// Render the lead's report.md as HTML (with alias→Aleph entity
+    /// links) via the bundled sift CLI, then let the CLI open it in the
+    /// browser. Runs on a background queue because rendering touches
+    /// SQLite. Falls back to opening the raw markdown if the render
+    /// fails — most commonly because the vault is locked or no Aleph
+    /// URL is stored.
     func openReport(_ state: RunState) {
+        let siftPath = Paths.findExecutable("sift")
+            ?? ProcessInfo.processInfo.environment["HOME"].map { "\($0)/.local/bin/sift" }
+        guard let siftPath, FileManager.default.isExecutableFile(atPath: siftPath) else {
+            openMarkdownFallback(state)
+            return
+        }
+        Task.detached {
+            let result = try? Subprocess.run(
+                [siftPath, "report", "--format", "html"],
+                cwd: URL(filePath: state.sessionDir)
+            )
+            if result?.code != 0 {
+                await self.reportRenderFailed(state, stderr: result?.stderr ?? "")
+            }
+        }
+    }
+
+    @MainActor
+    private func reportRenderFailed(_ state: RunState, stderr: String) {
+        Notifier.shared.post(
+            title: "sift: HTML render failed",
+            body: stderr.isEmpty
+                ? "Opened report.md instead — see `sift logs` for details."
+                : stderr,
+            sessionDir: state.sessionDir
+        )
+        openMarkdownFallback(state)
+    }
+
+    private func openMarkdownFallback(_ state: RunState) {
         let report = URL(filePath: state.sessionDir).appending(path: "report.md")
         if FileManager.default.fileExists(atPath: report.path) {
             NSWorkspace.shared.open(report)

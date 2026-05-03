@@ -237,14 +237,36 @@ public final class Store {
 
     public func assignAlias(_ eid: String) throws -> String {
         if let existing = try aliasFor(eid) { return existing }
-        let row = try selectRow("SELECT MAX(n) AS m FROM aliases", [])
-        let n = ((row?["m"] as? Int64) ?? 0) + 1
-        let alias = "r\(n)"
-        try execBind(
-            "INSERT INTO aliases VALUES (?, ?, ?, ?)",
-            [.text(alias), .int(Int(n)), .text(eid), .text(Self.isoNow())]
-        )
-        return alias
+        // The MAX(n) → INSERT pair must be atomic w.r.t. other writers
+        // sharing aleph.sqlite. Parallel sift CLI calls, the daemon,
+        // and the menu bar all open their own connections; without a
+        // transaction two of them would compute the same `n` and one
+        // would fail with `UNIQUE constraint failed: aliases.n`.
+        // BEGIN IMMEDIATE acquires the write lock before reading, so
+        // a concurrent assignAlias either waits behind us (handled by
+        // sqlite3_busy_timeout) or commits first — either way both
+        // ends up with distinct n.
+        try exec("BEGIN IMMEDIATE")
+        do {
+            // Re-check under the write lock: another writer may have
+            // just assigned this entity while we were waiting.
+            if let existing = try aliasFor(eid) {
+                try exec("COMMIT")
+                return existing
+            }
+            let row = try selectRow("SELECT MAX(n) AS m FROM aliases", [])
+            let n = ((row?["m"] as? Int64) ?? 0) + 1
+            let alias = "r\(n)"
+            try execBind(
+                "INSERT INTO aliases VALUES (?, ?, ?, ?)",
+                [.text(alias), .int(Int(n)), .text(eid), .text(Self.isoNow())]
+            )
+            try exec("COMMIT")
+            return alias
+        } catch {
+            try? exec("ROLLBACK")
+            throw error
+        }
     }
 
     public func resolveAlias(_ aliasOrId: String) throws -> String {

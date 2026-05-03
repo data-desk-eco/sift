@@ -56,11 +56,10 @@ struct AutoCommand: SiftSubcommand {
 
         // The active lead wins over "most recent" so the user can pin
         // a particular investigation and have every `sift auto`
-        // invocation default back to it. Don't gate on disk presence:
-        // if the prior run set the marker but the daemon hadn't yet
-        // run `Paths.ensure(sessionDir)` (race) or crashed before it
-        // (missing dir), the user still expects "continue my lead". The
-        // daemon will create the dir during prepare.
+        // invocation default back to it. `ActiveLead.get()` already
+        // gates on the named dir existing inside the research root,
+        // so a renamed / deleted lead falls through to "most recent"
+        // rather than silently re-creating an empty session.
         let leadDir: URL? = ActiveLead.get().map { researchDir.appending(path: $0) }
 
         let canResume = !new && (leadDir != nil

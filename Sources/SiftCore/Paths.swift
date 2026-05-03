@@ -8,7 +8,6 @@ public enum Paths {
         return URL(filePath: NSHomeDirectory()).appending(path: ".sift")
     }
 
-    public static var runDir: URL { siftHome.appending(path: "run") }
     public static var logDir: URL { siftHome.appending(path: "log") }
     public static var modelsDir: URL { siftHome.appending(path: "models") }
     public static var piConfigDir: URL { siftHome.appending(path: "pi") }

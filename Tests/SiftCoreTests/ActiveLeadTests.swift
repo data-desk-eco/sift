@@ -54,4 +54,38 @@ import Testing
             #expect(ActiveLead.get() == "acme-corp")
         }
     }
+
+    @Test func getReturnsNilWhenLeadDirMissing() throws {
+        try withTempHome { home in
+            let root = home.appending(path: "research")
+            try FileManager.default.createDirectory(
+                at: root, withIntermediateDirectories: true
+            )
+            try withEnv(["ALEPH_SESSION_DIR": root.path]) {
+                _ = ActiveLead.set("acme-corp")
+                // Dir doesn't exist yet → stale pointer.
+                #expect(ActiveLead.get() == nil)
+                // Create it → resolves cleanly.
+                try FileManager.default.createDirectory(
+                    at: root.appending(path: "acme-corp"),
+                    withIntermediateDirectories: true
+                )
+                #expect(ActiveLead.get() == "acme-corp")
+                // Simulate rename: dir gone again.
+                try FileManager.default.removeItem(
+                    at: root.appending(path: "acme-corp")
+                )
+                #expect(ActiveLead.get() == nil)
+            }
+        }
+    }
+
+    @Test func getReturnsNameWhenResearchRootUnreachable() {
+        withTempHome { _ in
+            // No ALEPH_SESSION_DIR, no mounted vault — fall back to
+            // returning the raw name; the caller surfaces the error.
+            _ = ActiveLead.set("acme-corp")
+            #expect(ActiveLead.get() == "acme-corp")
+        }
+    }
 }
