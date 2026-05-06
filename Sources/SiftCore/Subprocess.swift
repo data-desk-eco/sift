@@ -85,7 +85,7 @@ public enum Subprocess {
 
     /// Find an executable on `PATH`. Returns nil if not found. Pure
     /// Swift — no fork/exec — so it's safe to call from inside hot
-    /// paths and Touch-ID-gated flows.
+    /// paths.
     public static func which(_ name: String) -> String? {
         guard let path = ProcessInfo.processInfo.environment["PATH"] else {
             return nil

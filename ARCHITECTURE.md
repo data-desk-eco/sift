@@ -17,7 +17,7 @@ Sources/
 menu-bar app are thin glue. This split is enforced by the SPM target
 graph: trying to import AppKit into Core won't compile.
 
-## The three storage tiers
+## The two storage tiers
 
 ```
 ~/.sift/                              ← unencrypted operational state
@@ -32,6 +32,7 @@ graph: trying to import AppKit into Core won't compile.
   .vault.sparseimage                  ← AES-256 encrypted volume
 
 /Volumes/sift-vault-<hash>/           ← mount of the sparseimage
+  secrets.json                        ← Aleph + hosted-backend credentials
   research/
     aleph.sqlite                      ← shared cache (entities, aliases, edges)
     <session>/
@@ -39,19 +40,16 @@ graph: trying to import AppKit into Core won't compile.
       findings.db                     ← structured extractions
       auto.log, pi.stderr.log         ← per-session logs (rotated)
       .pi-sessions/                   ← pi's conversation history
-
-macOS Keychain (service "eco.datadesk.sift")
-  vault.passphrase                    ← random 256-bit passphrase
-  aleph.url, aleph.api-key            ← Aleph credentials
-  backend.hosted.api-key              ← optional hosted LLM key
 ```
 
-Three clear separations:
+Two clear separations:
 - **Operational state** in `~/.sift/` (no secrets, no investigation
   contents). Survives vault unmount.
-- **Investigation state** on the encrypted volume — research outputs,
-  the response cache, alias assignments. Mounted only after Touch ID.
-- **Secrets** in Keychain — never on disk, biometric ACL, device-only.
+- **Everything sensitive** on the encrypted volume — secrets, research
+  outputs, the response cache, alias assignments. Mounted only after
+  the user types the vault passphrase. The passphrase is chosen at
+  `sift init`, never persisted by sift, and prompted once per boot via
+  `requireVault()` — losing it is unrecoverable.
 
 ## The detached-daemon dance
 
@@ -135,7 +133,8 @@ when the agent starts) lists *only* the agent-safe commands:
 - **Off-limits to the agent:** `init`, `vault *`, `backend *`,
   `project *`, `auto`, `lead`, `status`, `logs`, `attach`, `stop`,
   `export`. Touching these from inside `sift auto` would prompt for
-  Touch ID, fork another agent, or stop the running session.
+  the vault passphrase, fork another agent, or stop the running
+  session.
 
 The agent doesn't enforce this with code — it follows the SKILL.md.
 But the `vault-guard.sh` hook in `.claude/hooks/` blocks Claude Code

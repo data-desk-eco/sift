@@ -251,7 +251,7 @@ public actor AlephClient {
         case 401, 403:
             return SiftError(
                 "auth failed (HTTP \(status)): \(msg)",
-                suggestion: "check the Aleph API key in Keychain"
+                suggestion: "check the Aleph API key with 'sift vault get ALEPH_API_KEY'"
             )
         case 404:
             return SiftError("not found: \(msg)", suggestion: "verify the entity ID or alias")

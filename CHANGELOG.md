@@ -4,86 +4,84 @@ All notable changes to sift land here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] — 2026-05-06
 
-### Added
-- `RotatingLog` — single-generation size-capped rotation (default 10 MB)
-  applied to `auto.log`, `pi.stderr.log`, `llama-server.log`, and
-  `~/.sift/log/sift.log`. Long agent runs no longer fill the vault.
-- `AlephClient.RetryPolicy` — automatic retry on 429 (honoring
-  `Retry-After`) and 5xx with exponential backoff. Default: 4 attempts,
-  1 s base, 30 s cap. Transient `URLError`s are also retried.
-- `SessionName` — strict allow-list validator gating every consumer
-  that turns a session name into a filesystem path. Closes a
-  defence-in-depth gap where a corrupted `~/.sift/active-lead` or a
-  hand-crafted run-state JSON could escape `~/.sift/run/`.
-- `Log.say(_:_:)` — central helper for `[scope]   message` stderr
-  lines, replacing 15+ open-coded `FileHandle.standardError.write`
-  call sites.
-- `Sift.shellQuote(_:)` — single source of truth for POSIX-safe shell
-  quoting; replaces two duplicate implementations.
-- `SiftSubcommand` protocol — funnels every CLI command's error
-  handling through one place. Subcommands implement `execute()`
-  instead of `run()`. Eliminated 33 instances of the
-  `do { ... } catch { throw ExitCode(reportSiftError(error)) }`
-  boilerplate.
-- `ARCHITECTURE.md` — narrative tour of the codebase for contributors.
-- `make test` target and `.github/workflows/ci.yml` for PR-time build
-  + test verification.
-- Tests: migrated from XCTest to swift-testing so the suite runs on
-  Command Line Tools alone — no Xcode required. Added test files for
-  `SessionName`, `RotatingLog`, `AlephClient` (retry/backoff with
-  stubbed `URLProtocol`), `Log.say`, `ActiveLead`, `Session.dbPath`,
-  `RunRegistry`, `SystemPrompt`, `PiRunner.resolveSession` and
-  helpers, `Sift.shellQuote`, `SiftError`, `Subprocess` (run/check/which
-  against real `/bin` binaries), `Backend.Config` (read/write/codable),
-  and the full `Commands/*` layer (`runSearch`, `runRead`, `runExpand`,
-  `runHubs`, `runSimilar`, `runSources`, `runBrowse`, `runTree`,
-  `runRecall`, `runSQL`, `runCacheStats`/`runCacheClear`,
-  `runNeighbors`) using stubbed Aleph responses. 159 tests, ~280 ms.
-  Line coverage of `SiftCore`: 26% → 61%.
+Initial public release. Native macOS investigation tool for Aleph
+/ OpenAleph with an optional self-driving agent mode (`sift auto`)
+built on the `pi-coding-agent` harness. Distributed as a Homebrew
+cask; the `Sift.app` bundles the CLI, the agent harness, and a
+SwiftUI menu-bar UI that surfaces live agent runs and exposes an
+App Intent for Shortcuts / Siri / Raycast.
 
-### Changed
-- `AlephClient.init` now throws if the URL scheme isn't http/https.
-  Defence-in-depth against a `file://` URL stored in Keychain
-  exfiltrating local files.
-- `BackendHosted` validates URL scheme before issuing the endpoint
-  health check.
-- `Backend.resolveRedirect` refuses non-https model-download targets,
-  blocking a downgrade attack on the model fetch.
-- `Backend.startLocal` kills the orphan process and removes the
-  pidfile if the readiness health check times out, so a retry isn't
-  blocked by a stale port collision.
-- `VaultService.initialize` no longer returns the passphrase. Callers
-  never used it; not handing it back removes a footgun and keeps the
-  passphrase out of caller stack frames.
-- `RunRegistry.update` now refuses to overwrite a `.stopped` status
-  with `.failed`, so a SIGTERM-driven `sift stop` reads as "stopped"
-  rather than "failed".
-- `RunRegistry.read` validates the decoded session name against
-  `SessionName.isValid`, treating malformed or hostile JSON files as
-  not-found.
-- `PiRunner` line-buffer cap (4 MiB) so a runaway pi event line can't
-  OOM the daemon.
-- `Subprocess.which` is now pure-Swift PATH walk — no fork/exec.
-- `RunStateModel.tailLog` writes to `~/.sift/tail/<session>.command`
-  rather than littering `/tmp` on every click.
-- `sift vault init` output explains where the passphrase lives, that
-  it's device-only, and how to back it up via Keychain Access.app.
+### Storage and credentials
+- AES-256 encrypted vault (hdiutil sparseimage) holds Aleph and
+  hosted-backend credentials, the shared response cache, alias
+  assignments, and per-session research outputs.
+- Passphrase-only unlock: the user picks a passphrase at `sift
+  init`, sift never persists it, and `requireVault()` prompts for
+  it once per boot. Losing it is unrecoverable.
+- Operational state in `~/.sift/` (no secrets, no investigation
+  contents) survives vault unmount.
 
-### Fixed
-- `VaultService.randomPassphrase` now throws on RNG failure rather
-  than silently producing a zero-byte passphrase.
-- `Deadline.parseDuration` — removed a tautological guard that did
-  nothing.
-- `Sift.entitlements` — dropped redundant/mislabeled keys
-  (`app-sandbox=false` was the default, `smartcard=false` was
-  incorrectly captioned "Touch ID"). Kept only the two load-bearing
-  hardened-runtime exceptions needed for pi's Node dylibs.
+### Agent loop
+- `sift auto "PROMPT"` detaches into a hidden `_daemon` subcommand
+  via `posix_spawnp + POSIX_SPAWN_SETSID`, returns to the shell,
+  and writes a per-session log + `.sift-run.json` sidecar inside
+  the session directory.
+- "Active lead" persists a single pinned session in
+  `~/.sift/active-lead`; `sift logs`, `sift attach`, `sift stop`,
+  and `sift status` default to it.
+- `llama-server` is reaped when no agent run is using it, freeing
+  ~14 GB of unified memory between sessions.
+- `RunRegistry` writes per-event progress that the menu-bar app
+  watches via `DispatchSource` and surfaces as native
+  `UNUserNotification`s on session transitions.
 
-## [0.1.0] — 2026-05-01
+### CLI surface
+- Agent-safe research commands (documented in the bundled
+  SKILL.md): `search`, `read`, `expand`, `browse`, `tree`,
+  `similar`, `hubs`, `sources`, `recall`, `sql`, `cache`, `time`.
+- Operator commands (off-limits to the agent): `init`, `vault *`,
+  `backend *`, `project *`, `auto`, `lead`, `status`, `logs`,
+  `attach`, `stop`, `export`.
+- `sift sql` is read-only — connection opened with
+  `SQLITE_OPEN_READONLY`; write-side statements report
+  `SQLITE_READONLY` rather than silently no-oping.
+- Aliases (`r1`, `r2`, …) are stable across every session on a
+  vault — the shared `aleph.sqlite` makes `r5` resolve to the same
+  entity weeks later, so an agent's report citing `r12` can be
+  reread by a human or another run.
 
-Initial public release. Native macOS investigation tool for Aleph /
-OpenAleph with optional self-driving agent mode. Encrypted vault,
-Keychain-stored credentials, menu bar app with App Intent for
-Shortcuts / Siri / Raycast, Homebrew cask distribution.
+### Reliability
+- `AlephClient.RetryPolicy`: automatic retry on 429 (honoring
+  `Retry-After`) and 5xx with exponential backoff. Default 4
+  attempts, 1 s base, 30 s cap; transient `URLError`s are retried
+  on the same curve.
+- `RotatingLog`: single-generation size-capped rotation (default
+  10 MB) on `auto.log`, `pi.stderr.log`, `llama-server.log`, and
+  `~/.sift/log/sift.log`, so long agent runs don't fill the vault.
+- `scanSubtree` fetches up to 4 pages of Aleph results in parallel
+  and ingests each page in a single SQLite transaction, so 200
+  entities cost roughly one fsync rather than 200.
+- `SessionName` strict allow-list validator gates every consumer
+  that turns a session name into a filesystem path, so a corrupted
+  `~/.sift/active-lead` or a hand-crafted run-state JSON cannot
+  escape `~/.sift/run/`.
+- `AlephClient.init` rejects non-http(s) URL schemes;
+  `Backend.resolveRedirect` refuses non-https model-download
+  targets.
+- `PiRunner` caps line buffers at 4 MiB so a runaway pi event line
+  can't OOM the daemon.
+
+### Build and distribution
+- Three SPM targets: `SiftCore` (pure logic), `sift` (CLI), and
+  `sift-menubar` (LSUIElement SwiftUI app, copied into
+  `Sift.app/Contents/MacOS/Sift` by `make bundle`).
+- `make build` produces an ad-hoc-signed app; `make release`
+  builds the self-contained zip the GitHub Release workflow
+  attaches.
+- `release.yml` builds the bundle, attaches the zip to the
+  GitHub release, and (if `TAP_PAT` is set) opens a PR against
+  `data-desk-eco/homebrew-tap` bumping `Casks/sift.rb`.
+- 165 tests pass via `make test` in ~290 ms using swift-testing —
+  Command Line Tools is enough, no Xcode required.
