@@ -53,7 +53,7 @@ private func treeForEntity(
     let cid = try store.collectionOf(eid)
     let scan = try await scanSubtree(
         client: client, store: store,
-        rootId: eid, collectionId: cid, maxEntities: 5000
+        rootId: eid, collectionId: cid, maxEntities: 1000
     )
     let rootAlias = (try store.aliasFor(eid)) ?? alias
     let rootName = stub?.name ?? stub?.caption ?? ""

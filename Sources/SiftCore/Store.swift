@@ -13,6 +13,10 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 public final class Store {
     public let dbPath: URL
     private var db: OpaquePointer?
+    /// True while a `withTransaction` body is executing on this connection.
+    /// Lets per-row writers like `assignAlias` skip their own BEGIN/COMMIT
+    /// so a batch caller can amortize fsync cost across many rows.
+    private var inTransaction: Bool = false
 
     public init(dbPath: URL) throws {
         self.dbPath = dbPath
@@ -245,13 +249,16 @@ public final class Store {
         // BEGIN IMMEDIATE acquires the write lock before reading, so
         // a concurrent assignAlias either waits behind us (handled by
         // sqlite3_busy_timeout) or commits first — either way both
-        // ends up with distinct n.
-        try exec("BEGIN IMMEDIATE")
+        // ends up with distinct n. When a batch caller has already
+        // opened a transaction via `withTransaction`, skip our own —
+        // the outer BEGIN IMMEDIATE provides the same serialization.
+        let owns = !inTransaction
+        if owns { try exec("BEGIN IMMEDIATE") }
         do {
             // Re-check under the write lock: another writer may have
             // just assigned this entity while we were waiting.
             if let existing = try aliasFor(eid) {
-                try exec("COMMIT")
+                if owns { try exec("COMMIT") }
                 return existing
             }
             let row = try selectRow("SELECT MAX(n) AS m FROM aliases", [])
@@ -261,9 +268,31 @@ public final class Store {
                 "INSERT INTO aliases VALUES (?, ?, ?, ?)",
                 [.text(alias), .int(Int(n)), .text(eid), .text(Self.isoNow())]
             )
-            try exec("COMMIT")
+            if owns { try exec("COMMIT") }
             return alias
         } catch {
+            if owns { try? exec("ROLLBACK") }
+            throw error
+        }
+    }
+
+    /// Run `body` inside a single `BEGIN IMMEDIATE … COMMIT` so a
+    /// caller writing many rows pays one fsync instead of N. Per-row
+    /// writers like `assignAlias` detect the open transaction and
+    /// skip their own. Not reentrant — nesting throws.
+    public func withTransaction<T>(_ body: () throws -> T) throws -> T {
+        if inTransaction {
+            throw SiftError("Store.withTransaction is not reentrant")
+        }
+        try exec("BEGIN IMMEDIATE")
+        inTransaction = true
+        do {
+            let result = try body()
+            try exec("COMMIT")
+            inTransaction = false
+            return result
+        } catch {
+            inTransaction = false
             try? exec("ROLLBACK")
             throw error
         }

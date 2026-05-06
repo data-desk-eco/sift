@@ -17,6 +17,14 @@ func scanSubtree(
     maxEntities: Int
 ) async throws -> SubtreeScanResult {
     let pageLimit = 200
+    /// Aleph's `from + size` cap on `/entities`: any offset >= 10_000
+    /// returns an error. We stop one page short to leave headroom.
+    let offsetCap = 9800
+    /// Concurrent in-flight page requests. OCCRP tolerates this fine
+    /// at our scale; lifting it further hits diminishing returns once
+    /// SQLite-write time matches network time.
+    let pageConcurrency = 4
+
     let cacheArgs: [String: Any] = [
         "root": rootId, "max": maxEntities,
         "collection": collectionId ?? "",
@@ -25,50 +33,125 @@ func scanSubtree(
     if let hit = try store.cacheGet(key) {
         let ents = (hit["entities"] as? [[String: Any]]) ?? []
         let serverName = client.serverName
-        for e in ents {
-            try seeEntity(
-                store: store, entity: e,
-                server: serverName, collectionId: collectionId
-            )
+        try store.withTransaction {
+            for e in ents {
+                try seeEntity(
+                    store: store, entity: e,
+                    server: serverName, collectionId: collectionId
+                )
+            }
         }
         let total = (hit["total"] as? Int) ?? ents.count
         let hitCap = (hit["hit_cap"] as? Bool) ?? false
         return SubtreeScanResult(entities: ents, total: total, hitCap: hitCap)
     }
 
-    var collected: [[String: Any]] = []
-    var total = 0
-    var offset = 0
-    var hitCap = false
-    while true {
+    func paramsFor(offset: Int) -> [String: Any] {
         var params: [String: Any] = [
             "filter:properties.ancestors": rootId,
             "filter:schemata": Schemas.treeDocSchemas,
             "limit": pageLimit, "offset": offset,
         ]
         if let cid = collectionId { params["filter:collection_id"] = cid }
-        let data = try await client.get("/entities", params: params)
-        total = (data["total"] as? Int) ?? total
-        let results = (data["results"] as? [[String: Any]]) ?? []
-        let serverName = client.serverName
-        for e in results {
-            try seeEntity(
-                store: store, entity: e,
-                server: serverName, collectionId: collectionId
-            )
-            collected.append(e)
-            if collected.count >= maxEntities {
-                hitCap = total > collected.count
-                let payload: [String: Any] = [
-                    "entities": collected, "total": total, "hit_cap": hitCap,
-                ]
-                try store.cacheSet(key, payload)
-                return SubtreeScanResult(entities: collected, total: total, hitCap: hitCap)
+        return params
+    }
+
+    let serverName = client.serverName
+    var collected: [[String: Any]] = []
+    var hitCap = false
+
+    /// Ingest a page's results into the store and append to `collected`.
+    /// Returns `true` when we've hit `maxEntities` and the caller should
+    /// stop. One transaction per page so 200 entities = ~1 fsync, not 200.
+    func ingest(_ results: [[String: Any]], total: Int) throws -> Bool {
+        try store.withTransaction {
+            for e in results {
+                try seeEntity(
+                    store: store, entity: e,
+                    server: serverName, collectionId: collectionId
+                )
+                collected.append(e)
+                if collected.count >= maxEntities {
+                    hitCap = total > collected.count
+                    return
+                }
             }
         }
-        if results.count < pageLimit { break }
-        offset += pageLimit
-        if offset >= 9800 { hitCap = true; break }
+        return hitCap
+    }
+
+    // Page 0 is sequential — we need its `total` to plan the rest.
+    let firstData = try await client.get("/entities", params: paramsFor(offset: 0))
+    var total = (firstData["total"] as? Int) ?? 0
+    let firstResults = (firstData["results"] as? [[String: Any]]) ?? []
+    if try ingest(firstResults, total: total) {
+        let payload: [String: Any] = [
+            "entities": collected, "total": total, "hit_cap": hitCap,
+        ]
+        try store.cacheSet(key, payload)
+        return SubtreeScanResult(entities: collected, total: total, hitCap: hitCap)
+    }
+    if firstResults.count < pageLimit {
+        let payload: [String: Any] = [
+            "entities": collected, "total": total, "hit_cap": false,
+        ]
+        try store.cacheSet(key, payload)
+        return SubtreeScanResult(entities: collected, total: total, hitCap: false)
+    }
+
+    // Plan remaining pages from `total`, capped by both `maxEntities`
+    // and Aleph's offset ceiling. We trust the first-page total as a
+    // hint; the per-page `results.count < pageLimit` short-circuit
+    // still covers the case where it shifts under us.
+    let pagesNeededByTotal = (total + pageLimit - 1) / pageLimit
+    let pagesNeededByCap = (maxEntities + pageLimit - 1) / pageLimit
+    let pagesNeededByOffset = offsetCap / pageLimit + 1
+    let lastPageIndex = min(pagesNeededByTotal, pagesNeededByCap, pagesNeededByOffset)
+    let remainingOffsets = (1..<lastPageIndex).map { $0 * pageLimit }
+    if remainingOffsets.isEmpty {
+        if total > collected.count { hitCap = true }
+        let payload: [String: Any] = [
+            "entities": collected, "total": total, "hit_cap": hitCap,
+        ]
+        try store.cacheSet(key, payload)
+        return SubtreeScanResult(entities: collected, total: total, hitCap: hitCap)
+    }
+
+    // Process in batches of `pageConcurrency`: fetch in parallel,
+    // ingest sequentially in offset order so `collected` stays a
+    // stable parent-child traversal. A short page ends the scan early.
+    var batchStart = 0
+    var sawShortPage = false
+    outer: while batchStart < remainingOffsets.count {
+        let batchEnd = min(batchStart + pageConcurrency, remainingOffsets.count)
+        let batch = Array(remainingOffsets[batchStart..<batchEnd])
+
+        let pages: [(Int, [String: Any])] = try await withThrowingTaskGroup(
+            of: (Int, [String: Any]).self
+        ) { group in
+            for off in batch {
+                group.addTask {
+                    let d = try await client.get("/entities", params: paramsFor(offset: off))
+                    return (off, d)
+                }
+            }
+            var out: [(Int, [String: Any])] = []
+            for try await page in group { out.append(page) }
+            return out.sorted { $0.0 < $1.0 }
+        }
+
+        for (_, data) in pages {
+            if let t = data["total"] as? Int { total = t }
+            let results = (data["results"] as? [[String: Any]]) ?? []
+            if try ingest(results, total: total) { break outer }
+            if results.count < pageLimit { sawShortPage = true; break outer }
+        }
+        batchStart = batchEnd
+    }
+
+    if !hitCap, !sawShortPage, lastPageIndex >= pagesNeededByOffset {
+        // We hit the offset ceiling without exhausting `total`.
+        hitCap = true
     }
     if total > collected.count { hitCap = true }
     let payload: [String: Any] = [
