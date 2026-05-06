@@ -1,6 +1,6 @@
 # sift
 
-A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/). Search documents, emails, and entities; follow extracted links; or let an agent drive an investigation end-to-end and write up what it finds.
+A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/). Search documents, emails, and entities directly, or let an agent run the investigation and write up what it finds.
 
 ## Quick start
 
@@ -19,16 +19,16 @@ sift status
 sift logs -f           # live tail, Ctrl-C to stop
 ```
 
-`sift auto` asks for a slug to name the new lead (default derived from the prompt) — pass `--slug acme` to skip the prompt. The menu bar app pops up, the agent runs in the background, and you get a notification when it's done. The report lands in your encrypted vault — `sift report` cats the markdown, `sift report --format html` renders it with live links to the source entities.
+`sift auto` prompts for a short slug to name the lead (default derived from the prompt; skip the prompt with `--slug acme`). The menu bar app surfaces the running session and notifies you when it finishes. The report lands inside the encrypted vault — `sift report` prints the markdown, `sift report --format html` renders it with live links to the source entities.
 
-## Highlights
+## Features
 
-- **`sift auto "PROMPT"`** runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon. Pass `-t 30m` for a soft deadline; `--slug` to name a fresh lead non-interactively.
-- **Active lead.** Each fresh `sift auto` becomes the active lead — bare `sift logs`, `sift stop`, and `sift status` (marked `*`) all target it. Switch with `sift lead use <name>`, or `sift lead clear` to fall back to most-recent.
-- **Two LLM backends.** Local Qwen3.6 35B via [llama.cpp](https://github.com/ggml-org/llama.cpp) (nothing leaves your Mac except Aleph queries) or any hosted OpenAI-compatible endpoint. Toggle with `sift backend local|hosted`.
-- **One CLI for humans and agents.** `sift search`, `sift read`, `sift expand`, `sift sql` all work standalone — call them yourself or let the agent drive them. `sift --help` lists everything.
-- **Shortcuts / Siri / Raycast.** The menu bar app registers an **Investigate Subject** App Intent — wire it to a hotkey, a Stream Deck button, or "Hey Siri, investigate X with sift".
-- **Encrypted by default.** Reports, the local cache, and API keys all live in a passphrase-protected sparseimage at `~/.sift/.vault.sparseimage`. The passphrase is prompted on first use after a reboot and never persisted; sift can't recover it for you.
+- `sift auto "PROMPT"` runs the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent as a detached daemon. Pass `-t 30m` for a soft deadline; `--slug` to name a fresh lead non-interactively.
+- Each fresh `sift auto` becomes the active lead, so bare `sift logs`, `sift stop`, and `sift status` (marked `*`) all target it. Switch with `sift lead use <name>` or `sift lead clear` to fall back to most-recent.
+- Local or hosted LLM backend. Local runs Qwen3.6 35B via [llama.cpp](https://github.com/ggml-org/llama.cpp); only Aleph queries leave the machine. Hosted accepts any OpenAI-compatible endpoint. Toggle with `sift backend local|hosted`.
+- The same command surface works for humans and the agent. `sift search`, `sift read`, `sift expand`, `sift sql` are usable from the shell or driven by the agent. `sift --help` lists everything.
+- The menu bar app registers an **Investigate Subject** App Intent for Shortcuts, Siri, and Raycast — bind it to a hotkey or a Stream Deck button.
+- Reports, the response cache, and API keys live in a passphrase-protected sparseimage at `~/.sift/.vault.sparseimage`. The passphrase is prompted on first use after a reboot and never persisted; lose it and the vault is unrecoverable.
 
 ## Requirements
 
