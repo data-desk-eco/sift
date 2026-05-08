@@ -23,13 +23,28 @@ public enum Paths {
             .appending(path: "Library/Application Support/Sift")
     }
 
+    /// Directory containing the running binary, with symlinks resolved.
+    /// `Bundle.main.bundleURL` returns the binary's directory as invoked,
+    /// so when sift is launched via the brew symlink at
+    /// `/opt/homebrew/bin/sift` it points at `/opt/homebrew/bin/` rather
+    /// than the real `Sift.app/Contents/Resources/bin/`. Resolving the
+    /// executable URL fixes both `bundledAppRoot()` (which would never
+    /// find the .app under the symlink path) and the SPM resource bundle
+    /// lookup in SiftCLI.
+    public static var executableDir: URL {
+        if let exe = Bundle.main.executableURL?.resolvingSymlinksInPath() {
+            return exe.deletingLastPathComponent()
+        }
+        return Bundle.main.bundleURL
+    }
+
     /// The Sift.app root, if the running process can find it by walking
     /// up from its own executable. Returns nil for dev / `swift run`
     /// builds where there is no enclosing .app. Works for both the
     /// menu bar app (whose Bundle.main IS the .app) and the CLI (whose
     /// Bundle.main is `Sift.app/Contents/Resources/bin`).
     public static func bundledAppRoot() -> URL? {
-        var url = Bundle.main.bundleURL
+        var url = executableDir
         for _ in 0..<6 {
             if url.pathExtension == "app" { return url }
             let parent = url.deletingLastPathComponent()

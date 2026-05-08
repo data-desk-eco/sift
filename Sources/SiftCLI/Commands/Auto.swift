@@ -239,30 +239,35 @@ func chooseFreshSlug(explicit: String?, prompt: String) throws -> String {
 
 // MARK: - Bundled-resource lookup
 
+/// Locate the SPM-emitted resource bundle next to the running binary.
+/// We avoid `Bundle.module` because its lookup is keyed off
+/// `Bundle.main.bundleURL`, which doesn't resolve symlinks — so when sift
+/// is launched via brew's `/opt/homebrew/bin/sift` symlink the SPM
+/// accessor looks in `/opt/homebrew/bin/` instead of the real
+/// `Sift.app/Contents/Resources/bin/` and fatal-errors. `Paths.executableDir`
+/// resolves the symlink first, so this works under brew-cask installs,
+/// `swift run`, and direct `.build/release/sift` invocations alike.
+private func siftCLIResourceBundle() -> URL {
+    Paths.executableDir.appending(path: "Sift_SiftCLI.bundle")
+}
+
 func siftCLIResources() -> SystemPrompt.ResourceURLs {
     // `.copy("Resources")` lands the markdown under
     // <bundle>/Resources/{AGENTS.md, sift/SKILL.md}. The leading
     // "Resources" subdirectory comes from the source-tree layout we
     // told SPM to copy verbatim.
-    SystemPrompt.ResourceURLs(
-        agentsMD: Bundle.module.url(
-            forResource: "AGENTS", withExtension: "md", subdirectory: "Resources"
-        ),
-        skillMD: Bundle.module.url(
-            forResource: "SKILL", withExtension: "md", subdirectory: "Resources/sift"
-        )
+    let resources = siftCLIResourceBundle().appending(path: "Resources")
+    let agents = resources.appending(path: "AGENTS.md")
+    let skill = resources.appending(path: "sift/SKILL.md")
+    let fm = FileManager.default
+    return SystemPrompt.ResourceURLs(
+        agentsMD: fm.fileExists(atPath: agents.path) ? agents : nil,
+        skillMD: fm.fileExists(atPath: skill.path) ? skill : nil
     )
 }
 
 func skillDir() -> URL {
     // pi requires the --skill directory's name to match the skill name
     // (i.e. `sift`) and to contain only SKILL.md.
-    let bundle = Bundle.module
-    if let url = bundle.url(
-        forResource: "sift", withExtension: nil, subdirectory: "Resources"
-    ) {
-        return url
-    }
-    // Fallback (shouldn't hit in production builds): synthesise it.
-    return bundle.bundleURL.appending(path: "Resources/sift")
+    siftCLIResourceBundle().appending(path: "Resources/sift")
 }
