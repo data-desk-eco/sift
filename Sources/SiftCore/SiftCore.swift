@@ -1,7 +1,7 @@
 import Foundation
 
 public enum Sift {
-    public static let version = "0.1.1"
+    public static let version = "0.1.2"
 
     /// Conservative single-quote shell quoting. Pass-through for tokens
     /// that match `[A-Za-z0-9_./-]+`; otherwise wraps in single quotes

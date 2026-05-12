@@ -26,7 +26,7 @@ SUPPORT_DIR := $(HOME)/Library/Application Support/Sift
 PI_DIR := $(SUPPORT_DIR)/pi
 PI_PACKAGE := @mariozechner/pi-coding-agent
 
-.PHONY: all build cli app bundle codesign install install-cli install-app install-pi uninstall run clean release release-bundle release-codesign release-zip print-version test
+.PHONY: all build cli app bundle codesign install install-cli install-app install-pi uninstall run clean release release-bundle release-codesign release-zip print-version test prune-pi
 
 all: build
 
@@ -69,7 +69,32 @@ install-pi:
 	@echo "pi       -> installing $(PI_PACKAGE) into $(PI_DIR)"
 	@cd "$(PI_DIR)" && npm install --silent --no-audit --no-fund \
 		--prefix "$(PI_DIR)" $(PI_PACKAGE)
+	@$(MAKE) --no-print-directory prune-pi PI_NODE_MODULES="$(PI_DIR)/node_modules"
 	@echo "pi       -> $(PI_DIR)/node_modules/.bin/pi"
+
+# Strip provider SDKs sift never invokes (it only ever uses pi's
+# openai-completions API path — see Backend.swift), non-arm64 native
+# binaries for koffi (the cask is Apple Silicon only), the universal
+# clipboard binary (the arm64-only one stays), and TypeScript types
+# (pi ships pre-compiled JS). Saves ~70 MB unpacked, ~25 MB in the zip.
+# PI_NODE_MODULES is passed in by callers.
+prune-pi:
+	@test -n "$(PI_NODE_MODULES)" || { echo "prune-pi: PI_NODE_MODULES not set" >&2; exit 1; }
+	@test -d "$(PI_NODE_MODULES)" || { echo "prune-pi: $(PI_NODE_MODULES) does not exist" >&2; exit 1; }
+	@rm -rf \
+		"$(PI_NODE_MODULES)/@anthropic-ai" \
+		"$(PI_NODE_MODULES)/@aws-sdk" \
+		"$(PI_NODE_MODULES)/@aws-crypto" \
+		"$(PI_NODE_MODULES)/@smithy" \
+		"$(PI_NODE_MODULES)/@google" \
+		"$(PI_NODE_MODULES)/@mistralai" \
+		"$(PI_NODE_MODULES)/@types" \
+		"$(PI_NODE_MODULES)/@mariozechner/clipboard-darwin-universal"
+	@if [ -d "$(PI_NODE_MODULES)/koffi/build/koffi" ]; then \
+		find "$(PI_NODE_MODULES)/koffi/build/koffi" -mindepth 1 -maxdepth 1 -type d \
+			! -name darwin_arm64 -exec rm -rf {} +; \
+	fi
+	@echo "pi       -> pruned unused provider SDKs and non-arm64 binaries"
 
 uninstall:
 	@rm -f $(BINDIR)/sift
@@ -144,6 +169,8 @@ release-bundle: cli cli-menubar
 	@cd $(RELEASE_DIR)/$(APP_BUNDLE)/Contents/Resources/pi && \
 		npm install --silent --no-audit --no-fund \
 		--prefix . $(PI_PACKAGE)
+	@$(MAKE) --no-print-directory prune-pi \
+		PI_NODE_MODULES="$(RELEASE_DIR)/$(APP_BUNDLE)/Contents/Resources/pi/node_modules"
 	@echo "bundled  -> $(RELEASE_DIR)/$(APP_BUNDLE) (v$(VERSION))"
 
 release-codesign: release-bundle
