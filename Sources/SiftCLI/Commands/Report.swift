@@ -17,8 +17,8 @@ struct ReportCommand: SiftSubcommand {
             to HTML with alias→Aleph entity links and opens it in the
             browser. With --list, prints every lead that has a report.md.
 
-            <LEAD> resolution when omitted: cwd's report.md → ALEPH_SESSION_DIR
-            → most recently modified lead under the vault.
+            <LEAD> resolution when omitted: cwd's report.md → active lead
+            (`sift lead`) → most recently modified lead under the vault.
             """
     )
 
@@ -185,6 +185,16 @@ struct ReportCommand: SiftSubcommand {
             return cwdReport
         }
         let researchDir = try researchRoot()
+        if let active = ActiveLead.get() {
+            let report = researchDir.appending(path: active).appending(path: "report.md")
+            guard FileManager.default.fileExists(atPath: report.path) else {
+                throw SiftError(
+                    "no report.md for active lead: \(active)",
+                    suggestion: "run `sift auto \"...\"` in this lead, pass an explicit lead name, or `sift report --list`"
+                )
+            }
+            return report
+        }
         let candidates = (try? FileManager.default.contentsOfDirectory(
             at: researchDir, includingPropertiesForKeys: [.contentModificationDateKey]
         )) ?? []
