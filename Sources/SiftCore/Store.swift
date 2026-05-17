@@ -353,6 +353,22 @@ public final class Store {
         return data.sha256Hex().prefix(16).description
     }
 
+    /// Look up `(command, args)` in the response cache; on miss, run
+    /// `fetch`, store the result, and return it. The `cached` flag tells
+    /// callers whether to mark the envelope as a cache hit.
+    public func cacheOrFetch(
+        command: String, args: [String: Any], skipCache: Bool = false,
+        fetch: () async throws -> [String: Any]
+    ) async throws -> (data: [String: Any], cached: Bool) {
+        let key = try Self.cacheKey(command: command, args: args)
+        if !skipCache, let hit = try cacheGet(key) {
+            return (hit, true)
+        }
+        let fresh = try await fetch()
+        try cacheSet(key, fresh)
+        return (fresh, false)
+    }
+
     // MARK: - Iterating connection (for ad-hoc reads)
 
     public var connection: OpaquePointer? { db }

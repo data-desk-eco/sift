@@ -58,6 +58,6 @@ struct StopCommand: SiftSubcommand {
         // Belt-and-braces: the daemon also calls stopLocalIfIdle on
         // exit, but a SIGTERM'd daemon may not run cleanup, so we
         // double up here. Idempotent — no-op if already stopped.
-        Backend.stopLocalIfIdle()
+        LlamaServer.stopLocalIfIdle()
     }
 }

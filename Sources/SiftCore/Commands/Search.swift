@@ -66,15 +66,9 @@ public func runSearch(
         "date_from": input.dateFrom ?? NSNull(),
         "date_to": input.dateTo ?? NSNull(),
     ]
-    let key = try Store.cacheKey(command: "search", args: cacheArgs)
-
-    var data: [String: Any]?
-    var cached = false
-    if !input.noCache, let hit = try store.cacheGet(key) {
-        data = hit
-        cached = true
-    }
-    if data == nil {
+    let (data, cached) = try await store.cacheOrFetch(
+        command: "search", args: cacheArgs, skipCache: input.noCache
+    ) {
         let params = makeParams(
             query: input.query, type: effectiveType,
             limit: input.limit, offset: input.offset,
@@ -82,14 +76,12 @@ public func runSearch(
             emitterId: emitterId, recipientId: recipientId, mentionsId: mentionsId,
             dateFrom: input.dateFrom, dateTo: input.dateTo
         )
-        let fresh = try await client.get("/entities", params: params)
-        try store.cacheSet(key, fresh)
-        data = fresh
+        return try await client.get("/entities", params: params)
     }
 
-    var results = (data?["results"] as? [[String: Any]]) ?? []
-    let total = (data?["total"] as? Int) ?? results.count
-    let totalType = (data?["total_type"] as? String) ?? "eq"
+    var results = (data["results"] as? [[String: Any]]) ?? []
+    let total = (data["total"] as? Int) ?? results.count
+    let totalType = (data["total_type"] as? String) ?? "eq"
 
     if input.sortByDate {
         results.sort { lhs, rhs in

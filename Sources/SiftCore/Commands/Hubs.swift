@@ -38,20 +38,14 @@ public func runHubs(
         "q": input.query, "schema": input.schema,
         "collection": input.collection ?? NSNull(), "topN": topN,
     ]
-    let key = try Store.cacheKey(command: "hubs_facet", args: cacheArgs)
-    var data: [String: Any]?
-    var cached = false
-    if let hit = try store.cacheGet(key) {
-        data = hit; cached = true
-    }
-    if data == nil {
-        let fresh = try await client.get("/entities", params: apiParams)
-        try store.cacheSet(key, fresh)
-        data = fresh
+    let (data, cached) = try await store.cacheOrFetch(
+        command: "hubs_facet", args: cacheArgs
+    ) {
+        try await client.get("/entities", params: apiParams)
     }
 
-    let total = (data?["total"] as? Int) ?? 0
-    let facets = (data?["facets"] as? [String: Any]) ?? [:]
+    let total = (data["total"] as? Int) ?? 0
+    let facets = (data["facets"] as? [String: Any]) ?? [:]
     let serverName = client.serverName
 
     // Backfill missing party stubs so facet rows show readable names.

@@ -141,7 +141,7 @@ final class RunStateModel {
         }
         // Free llama-server's ~14 GB if no other auto run still needs
         // it — same logic as the CLI `sift stop`.
-        Backend.stopLocalIfIdle()
+        LlamaServer.stopLocalIfIdle()
         reload()
     }
 

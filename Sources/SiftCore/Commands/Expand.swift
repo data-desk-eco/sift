@@ -18,21 +18,15 @@ public func runExpand(
     var params: [String: Any] = ["limit": input.limit]
     if let p = input.property { params["filter:property"] = p }
 
-    let key = try Store.cacheKey(command: "expand", args: [
-        "id": eid, "property": input.property ?? NSNull(), "limit": input.limit,
-    ])
-    var data: [String: Any]?
-    var cached = false
-    if !input.noCache, let hit = try store.cacheGet(key) {
-        data = hit; cached = true
-    }
-    if data == nil {
-        let fresh = try await client.get("/entities/\(eid)/expand", params: params)
-        try store.cacheSet(key, fresh)
-        data = fresh
+    let (data, cached) = try await store.cacheOrFetch(
+        command: "expand",
+        args: ["id": eid, "property": input.property ?? NSNull(), "limit": input.limit],
+        skipCache: input.noCache
+    ) {
+        try await client.get("/entities/\(eid)/expand", params: params)
     }
 
-    let groups = (data?["results"] as? [[String: Any]]) ?? []
+    let groups = (data["results"] as? [[String: Any]]) ?? []
 
     let stub = try store.getEntity(eid)
     let isParty = stub.map { Schemas.partySchemas.contains($0.schema) } ?? false

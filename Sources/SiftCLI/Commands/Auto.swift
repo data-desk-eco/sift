@@ -70,7 +70,7 @@ struct AutoCommand: SiftSubcommand {
             // REPL, or detached run that should land on an existing
             // session — let PiRunner pick lead → most-recent → default.
             resolution = PiRunner.resolveSession(
-                researchDir: researchDir, prompt: nil,
+                researchDir: researchDir,
                 newSession: new, leadDir: leadDir
             )
         } else {
@@ -115,88 +115,11 @@ struct AutoCommand: SiftSubcommand {
         // run light up immediately rather than having to open it by hand.
         PiRunner.ensureMenuBarRunning()
 
-        try await spawnDaemon(
+        let pid = try PiRunner.spawnDaemon(
             sessionDir: resolution.sessionDir, resuming: resolution.resuming,
             prompt: promptText, deadline: deadline, debug: debug
         )
-    }
-
-    /// Re-exec the current binary as `sift _daemon ...` with setsid so the
-    /// resulting process survives our exit, then return to the shell.
-    private func spawnDaemon(
-        sessionDir: URL, resuming: Bool,
-        prompt: String, deadline: Deadline?, debug: Bool
-    ) async throws {
-        let exe = ProcessInfo.processInfo.arguments[0]
-        // Resolve to absolute path so the child can find itself even if
-        // the current shell PATH changes.
-        let exePath: String
-        if exe.hasPrefix("/") {
-            exePath = exe
-        } else if let resolved = Subprocess.which("sift") {
-            exePath = resolved
-        } else {
-            exePath = exe
-        }
-
-        var args: [String] = [
-            "_daemon",
-            "--session-dir", sessionDir.path,
-            "--prompt", prompt,
-        ]
-        if resuming { args.append("--resuming") }
-        if debug    { args.append("--debug") }
-        if let dl = deadline {
-            args.append(contentsOf: [
-                "--deadline-start", String(dl.startTimestamp),
-                "--deadline-end",   String(dl.endTimestamp),
-            ])
-        }
-
-        // Use posix_spawnp with POSIX_SPAWN_SETSID so the child detaches
-        // from our session — survives shell exit, ignores SIGHUP.
-        var attr = posix_spawnattr_t(nil as OpaquePointer?)
-        posix_spawnattr_init(&attr)
-        defer { posix_spawnattr_destroy(&attr) }
-        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID))
-
-        var fileActions = posix_spawn_file_actions_t(nil as OpaquePointer?)
-        posix_spawn_file_actions_init(&fileActions)
-        defer { posix_spawn_file_actions_destroy(&fileActions) }
-        // Redirect stdin/stdout/stderr to /dev/null so the child has no
-        // tie to our terminal.
-        for fd in [0, 1, 2] as [Int32] {
-            posix_spawn_file_actions_addopen(
-                &fileActions, fd, "/dev/null", O_RDWR, 0
-            )
-        }
-
-        var argv: [UnsafeMutablePointer<CChar>?] =
-            [strdup(exePath)] + args.map { strdup($0) } + [nil]
-        var envv: [UnsafeMutablePointer<CChar>?] =
-            ProcessInfo.processInfo.environment
-                .map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer {
-            for p in argv where p != nil { free(p) }
-            for p in envv where p != nil { free(p) }
-        }
-
-        var pid: pid_t = 0
-        let rc = argv.withUnsafeMutableBufferPointer { argvBuf in
-            envv.withUnsafeMutableBufferPointer { envvBuf in
-                exePath.withCString { cpath in
-                    posix_spawnp(&pid, cpath, &fileActions, &attr,
-                                 argvBuf.baseAddress, envvBuf.baseAddress)
-                }
-            }
-        }
-        if rc != 0 {
-            throw SiftError(
-                "couldn't spawn daemon: \(String(cString: strerror(rc)))"
-            )
-        }
-
-        let session = sessionDir.lastPathComponent
+        let session = resolution.sessionDir.lastPathComponent
         Log.say("auto", "started \(session) (pid \(pid))")
         FileHandle.standardError.write(Data(
             "  → live progress: menu bar item, or `sift status` / `sift logs -f`\n".utf8

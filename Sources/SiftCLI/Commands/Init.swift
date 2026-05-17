@@ -85,8 +85,8 @@ struct InitCommand: SiftSubcommand {
         let choice = promptUser("Choose [1]:").trimmingCharacters(in: .whitespacesAndNewlines)
         switch choice.isEmpty ? "1" : choice {
         case "1":
-            try Backend.ensureLlamacpp()
-            try Backend.downloadModel()
+            try LlamaServer.ensureLlamacpp()
+            try LlamaServer.downloadModel()
             try Backend.writeLocal()
         case "2":
             try await BackendHosted().execute()

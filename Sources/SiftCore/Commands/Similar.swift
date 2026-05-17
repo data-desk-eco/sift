@@ -21,23 +21,16 @@ public func runSimilar(
         )
     }
 
-    let key = try Store.cacheKey(
+    let (data, cached) = try await store.cacheOrFetch(
         command: "similar", args: ["id": eid, "limit": input.limit]
-    )
-    var data: [String: Any]?
-    var cached = false
-    if let hit = try store.cacheGet(key) {
-        data = hit; cached = true
-    } else {
-        let fresh = try await client.get(
+    ) {
+        try await client.get(
             "/entities/\(eid)/similar", params: ["limit": input.limit]
         )
-        try store.cacheSet(key, fresh)
-        data = fresh
     }
 
-    let results = (data?["results"] as? [[String: Any]]) ?? []
-    let total = (data?["total"] as? Int) ?? results.count
+    let results = (data["results"] as? [[String: Any]]) ?? []
+    let total = (data["total"] as? Int) ?? results.count
     if results.isEmpty {
         return Render.envelope(
             "similar \(input.alias)",

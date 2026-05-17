@@ -31,8 +31,8 @@ struct BackendLocal: SiftSubcommand {
         abstract: "Switch to local llama.cpp + Qwen3.6 35B."
     )
     func execute() async throws {
-        try Backend.ensureLlamacpp()
-        try Backend.downloadModel()
+        try LlamaServer.ensureLlamacpp()
+        try LlamaServer.downloadModel()
         try Backend.writeLocal()
         print("[backend]  switched to local")
     }

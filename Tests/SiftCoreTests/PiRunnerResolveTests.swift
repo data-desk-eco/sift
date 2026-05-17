@@ -25,8 +25,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: dir) }
         let lead = dir.appending(path: "pinned")
         let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: nil, newSession: false,
-            leadDir: lead
+            researchDir: dir, newSession: false, leadDir: lead
         )
         #expect(res.sessionDir == lead)
         #expect(res.resuming)
@@ -34,14 +33,17 @@ import Testing
     }
 
     @Test func leadDirIgnoredWhenNew() throws {
-        let dir = try makeResearch([])
+        // With --new, resolveSession bypasses both the lead and most-recent
+        // paths; the CLI builds the fresh session dir itself once it has a
+        // slug. The fallthrough lands on "default" — that's just a marker
+        // that the caller is responsible for naming.
+        let dir = try makeResearch([("recent", Date())])
         defer { try? FileManager.default.removeItem(at: dir) }
         let lead = dir.appending(path: "pinned")
         let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: "fresh", newSession: true,
-            leadDir: lead, freshSlug: "fresh"
+            researchDir: dir, newSession: true, leadDir: lead
         )
-        #expect(res.sessionDir.lastPathComponent == "fresh")
+        #expect(res.sessionDir != lead)
         #expect(!res.resuming)
     }
 
@@ -53,7 +55,7 @@ import Testing
         ])
         defer { try? FileManager.default.removeItem(at: dir) }
         let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: nil, newSession: false
+            researchDir: dir, newSession: false
         )
         #expect(res.sessionDir.lastPathComponent == "recent")
         #expect(res.resuming)
@@ -64,7 +66,7 @@ import Testing
         let dir = try makeResearch([("vintage", oldEnough)])
         defer { try? FileManager.default.removeItem(at: dir) }
         let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: nil, newSession: false
+            researchDir: dir, newSession: false
         )
         #expect(res.sessionDir.lastPathComponent == "vintage")
         #expect(res.staleAge != nil)
@@ -79,29 +81,19 @@ import Testing
         ])
         defer { try? FileManager.default.removeItem(at: dir) }
         let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: nil, newSession: false
+            researchDir: dir, newSession: false
         )
         #expect(res.sessionDir.lastPathComponent == "real-session")
     }
 
-    @Test func emptyResearchWithPromptCreatesSlug() throws {
+    @Test func emptyResearchLandsOnDefault() throws {
         let dir = try makeResearch([])
         defer { try? FileManager.default.removeItem(at: dir) }
         let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: "go", newSession: false,
-            freshSlug: "freshly-named"
-        )
-        #expect(res.sessionDir.lastPathComponent == "freshly-named")
-        #expect(!res.resuming)
-    }
-
-    @Test func emptyResearchWithoutPromptLandsOnDefault() throws {
-        let dir = try makeResearch([])
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let res = PiRunner.resolveSession(
-            researchDir: dir, prompt: nil, newSession: false
+            researchDir: dir, newSession: false
         )
         #expect(res.sessionDir.lastPathComponent == "default")
+        #expect(!res.resuming)
     }
 }
 

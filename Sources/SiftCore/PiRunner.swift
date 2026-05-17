@@ -25,10 +25,10 @@ public enum PiRunner {
         public var piSessionDir: URL
     }
 
-    /// Decide what session to resume / create. The caller (CLI auto
-    /// command) is responsible for prompting the user for a fresh slug
-    /// — we just take whatever it hands back via `freshSlug` and apply
-    /// `uniqueName` to avoid colliding with an existing directory.
+    /// Decide what session to resume. Only resumes — fresh-session
+    /// naming is the CLI's job (it has to prompt for a slug
+    /// interactively), and `Auto` constructs its own `SessionResolution`
+    /// once a slug is in hand.
     public struct SessionResolution: Sendable {
         public var sessionDir: URL
         public var resuming: Bool
@@ -43,8 +43,7 @@ public enum PiRunner {
     public static let staleSessionHours = 24
 
     public static func resolveSession(
-        researchDir: URL, prompt: String?, newSession: Bool,
-        leadDir: URL? = nil, freshSlug: String? = nil
+        researchDir: URL, newSession: Bool, leadDir: URL? = nil
     ) -> SessionResolution {
         // Active lead — if the user has pinned one — wins over "most
         // recent" so a typed `sift auto` always lands on the same
@@ -57,14 +56,6 @@ public enum PiRunner {
             let ageHours = (Date().timeIntervalSince1970 - lastMod) / 3600
             let stale = ageHours >= Double(staleSessionHours) ? formatAge(ageHours) : nil
             return SessionResolution(sessionDir: last, resuming: true, staleAge: stale)
-        }
-        if let prompt, !prompt.isEmpty {
-            let base = (freshSlug?.isEmpty == false) ? freshSlug! : fallbackTimestamp()
-            let name = uniqueName(researchDir: researchDir, base: base)
-            return SessionResolution(
-                sessionDir: researchDir.appending(path: name),
-                resuming: false, staleAge: nil
-            )
         }
         return SessionResolution(
             sessionDir: researchDir.appending(path: "default"),
@@ -81,7 +72,7 @@ public enum PiRunner {
         try Sift.ensureInitialized()
         try requirePi()
 
-        try Backend.start()
+        try LlamaServer.start()
         try Backend.configurePi()
 
         let dlNote = deadline.map { dl in
@@ -150,11 +141,11 @@ public enum PiRunner {
         )
     }
 
-    // MARK: - Foreground REPL
-
-    public static func execReplaceWithPi(prelaunch: Prelaunch) -> Never {
+    /// Args common to both pi launch modes (REPL via execve, daemon via
+    /// Process). The REPL form additionally needs "pi" as argv[0]; the
+    /// daemon form appends `-p --mode json <prompt>`.
+    private static func piBaseArgs(prelaunch: Prelaunch) -> [String] {
         var args = [
-            "pi",
             "--system-prompt", prelaunch.systemPromptPath.path,
             "--skill", prelaunch.skillDir.path,
             "--session-dir", prelaunch.piSessionDir.path,
@@ -162,10 +153,99 @@ public enum PiRunner {
         if prelaunch.resuming, prelaunch.hasPriorPiHistory {
             args.append("--continue")
         }
+        return args
+    }
+
+    // MARK: - Foreground REPL
+
+    public static func execReplaceWithPi(prelaunch: Prelaunch) -> Never {
+        let args = ["pi"] + piBaseArgs(prelaunch: prelaunch)
         execvpeOrDie("pi", args, env: prelaunch.env)
     }
 
-    // MARK: - Daemon mode
+    // MARK: - Daemon spawn (parent side)
+
+    /// Re-exec the current binary as `sift _daemon ...` with setsid so
+    /// the resulting process survives our exit, then return. The child
+    /// inherits our environment and writes its own sidecar from
+    /// `runDaemon`. Called by `sift auto` when it has a prompt to run
+    /// headlessly.
+    public static func spawnDaemon(
+        sessionDir: URL, resuming: Bool,
+        prompt: String, deadline: Deadline?, debug: Bool
+    ) throws -> pid_t {
+        let exe = ProcessInfo.processInfo.arguments[0]
+        // Resolve to absolute path so the child can find itself even if
+        // the current shell PATH changes.
+        let exePath: String
+        if exe.hasPrefix("/") {
+            exePath = exe
+        } else if let resolved = Subprocess.which("sift") {
+            exePath = resolved
+        } else {
+            exePath = exe
+        }
+
+        var args: [String] = [
+            "_daemon",
+            "--session-dir", sessionDir.path,
+            "--prompt", prompt,
+        ]
+        if resuming { args.append("--resuming") }
+        if debug    { args.append("--debug") }
+        if let dl = deadline {
+            args.append(contentsOf: [
+                "--deadline-start", String(dl.startTimestamp),
+                "--deadline-end",   String(dl.endTimestamp),
+            ])
+        }
+
+        // Use posix_spawnp with POSIX_SPAWN_SETSID so the child detaches
+        // from our session — survives shell exit, ignores SIGHUP.
+        var attr = posix_spawnattr_t(nil as OpaquePointer?)
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID))
+
+        var fileActions = posix_spawn_file_actions_t(nil as OpaquePointer?)
+        posix_spawn_file_actions_init(&fileActions)
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+        // Redirect stdin/stdout/stderr to /dev/null so the child has no
+        // tie to our terminal.
+        for fd in [0, 1, 2] as [Int32] {
+            posix_spawn_file_actions_addopen(
+                &fileActions, fd, "/dev/null", O_RDWR, 0
+            )
+        }
+
+        var argv: [UnsafeMutablePointer<CChar>?] =
+            [strdup(exePath)] + args.map { strdup($0) } + [nil]
+        var envv: [UnsafeMutablePointer<CChar>?] =
+            ProcessInfo.processInfo.environment
+                .map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer {
+            for p in argv where p != nil { free(p) }
+            for p in envv where p != nil { free(p) }
+        }
+
+        var pid: pid_t = 0
+        let rc = argv.withUnsafeMutableBufferPointer { argvBuf in
+            envv.withUnsafeMutableBufferPointer { envvBuf in
+                exePath.withCString { cpath in
+                    posix_spawnp(&pid, cpath, &fileActions, &attr,
+                                 argvBuf.baseAddress, envvBuf.baseAddress)
+                }
+            }
+        }
+        if rc != 0 {
+            throw SiftError(
+                "couldn't spawn daemon: \(String(cString: strerror(rc)))"
+            )
+        }
+        return pid
+    }
+
+    // MARK: - Daemon body (child side)
 
     public static func runDaemon(
         prelaunch: Prelaunch, prompt: String, debug: Bool
@@ -204,15 +284,7 @@ public enum PiRunner {
         }
         try RunRegistry.write(state)
 
-        var args = [
-            "--system-prompt", prelaunch.systemPromptPath.path,
-            "--skill", prelaunch.skillDir.path,
-            "--session-dir", prelaunch.piSessionDir.path,
-        ]
-        if prelaunch.resuming, prelaunch.hasPriorPiHistory {
-            args.append("--continue")
-        }
-        args.append(contentsOf: ["-p", "--mode", "json", prompt])
+        let args = piBaseArgs(prelaunch: prelaunch) + ["-p", "--mode", "json", prompt]
 
         let pi = Process()
         pi.executableURL = URL(filePath: try resolveExecutable("pi"))
@@ -305,7 +377,7 @@ public enum PiRunner {
         // If this was the last running session, free the local llama
         // model from unified memory — otherwise it keeps ~14 GB pinned
         // and the rest of the Mac runs slowly.
-        Backend.stopLocalIfIdle()
+        LlamaServer.stopLocalIfIdle()
         // The menu bar app posts a native UNUserNotification when it
         // sees the run-state file flip out of `.running`.
         return code
