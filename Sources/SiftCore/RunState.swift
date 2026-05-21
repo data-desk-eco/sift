@@ -33,6 +33,11 @@ public struct RunState: Sendable {
     public var lastEventAt: Int
     public var exitCode: Int32?
     public var finishedAt: Int?
+    // Marathon mode: the outer time budget covering every leg, and
+    // the leg number currently executing (starts at 1). Both stay
+    // nil for non-marathon runs.
+    public var marathonEndTs: Int?
+    public var legNumber: Int?
 
     public init(
         session: String, sessionDir: String, logPath: String,
@@ -53,6 +58,8 @@ public struct RunState: Sendable {
         self.lastEventAt = startedAt
         self.exitCode = nil
         self.finishedAt = nil
+        self.marathonEndTs = nil
+        self.legNumber = nil
     }
 
     fileprivate init(payload: RunStatePayload, sessionDir: URL) {
@@ -70,6 +77,8 @@ public struct RunState: Sendable {
         self.lastEventAt = payload.lastEventAt
         self.exitCode = payload.exitCode
         self.finishedAt = payload.finishedAt
+        self.marathonEndTs = payload.marathonEndTs
+        self.legNumber = payload.legNumber
     }
 }
 
@@ -88,6 +97,8 @@ private struct RunStatePayload: Codable {
     var lastEventAt: Int
     var exitCode: Int32?
     var finishedAt: Int?
+    var marathonEndTs: Int?
+    var legNumber: Int?
 
     init(from state: RunState) {
         self.prompt = state.prompt
@@ -101,6 +112,8 @@ private struct RunStatePayload: Codable {
         self.lastEventAt = state.lastEventAt
         self.exitCode = state.exitCode
         self.finishedAt = state.finishedAt
+        self.marathonEndTs = state.marathonEndTs
+        self.legNumber = state.legNumber
     }
 }
 

@@ -26,8 +26,11 @@ struct AutoCommand: SiftSubcommand {
           help: "log raw pi events instead of the filtered terse log")
     var debug: Bool = false
     @Option(name: [.short, .customLong("time-limit")],
-            help: "soft deadline (e.g. 30m, 1h30m, 90s); the agent self-paces")
+            help: "soft deadline (e.g. 30m, 1h30m, 90s); the agent self-paces. With --marathon this is the per-leg budget (default 30m).")
     var timeLimit: String?
+    @Option(name: .customLong("marathon"),
+            help: "run as a marathon: loop multiple fresh-context legs for up to this total budget (e.g. 4h). Each leg gets its own deadline (--time-limit); between legs the context is reset and the agent continues from report.md / findings.db.")
+    var marathon: String?
     @Flag(name: [.short, .customLong("resume")],
           help: "continue the active lead (or most recent) instead of starting fresh")
     var resume: Bool = false
@@ -36,14 +39,49 @@ struct AutoCommand: SiftSubcommand {
     var slug: String?
 
     func execute() async throws {
-        // Parse the deadline first so a bad value fails fast, before
+        // Parse all durations first so a bad value fails fast, before
         // any vault unlock or backend startup happens.
-        let deadline: Deadline?
+        let marathonSeconds: Int?
+        if let raw = marathon {
+            marathonSeconds = try Deadline.parseDuration(raw)
+        } else {
+            marathonSeconds = nil
+        }
+        // Marathon runs need a meaningful per-leg budget — without one
+        // the agent has no pacing signal and either burns out fast or
+        // never wraps a leg cleanly. Default to 30m, which is roughly
+        // where pi's context starts to feel its weight.
+        let legSeconds: Int?
         if let raw = timeLimit {
-            let seconds = try Deadline.parseDuration(raw)
+            legSeconds = try Deadline.parseDuration(raw)
+        } else if marathonSeconds != nil {
+            legSeconds = 30 * 60
+        } else {
+            legSeconds = nil
+        }
+        // Foreground REPL doesn't loop legs — marathon only makes sense
+        // for the detached headless path where the daemon can outlive
+        // the user's terminal.
+        if marathon != nil, prompt.isEmpty {
+            throw SiftError(
+                "--marathon needs a PROMPT — it's a headless-only mode",
+                suggestion: "`sift auto \"your goal\" --marathon 4h`"
+            )
+        }
+        if let total = marathonSeconds, let leg = legSeconds, total <= leg {
+            throw SiftError(
+                "--marathon \(marathon!) is not longer than the leg time \(timeLimit ?? "30m")",
+                suggestion: "make the marathon budget at least 2× the leg time, or drop --marathon"
+            )
+        }
+        let deadline: Deadline?
+        if let seconds = legSeconds {
             deadline = Deadline(seconds: seconds)
         } else {
             deadline = nil
+        }
+        let marathonEnd: Int? = marathonSeconds.map {
+            Int(Date().timeIntervalSince1970) + $0
         }
 
         try Sift.ensureInitialized()
@@ -113,10 +151,17 @@ struct AutoCommand: SiftSubcommand {
 
         let pid = try PiRunner.spawnDaemon(
             sessionDir: resolution.sessionDir, resuming: resolution.resuming,
-            prompt: promptText, deadline: deadline, debug: debug
+            prompt: promptText, deadline: deadline,
+            marathonEnd: marathonEnd, debug: debug
         )
         let session = resolution.sessionDir.lastPathComponent
-        Log.say("auto", "started \(session) (pid \(pid))")
+        if marathonEnd != nil {
+            let total = Deadline.formatRemaining(marathonSeconds ?? 0)
+            let leg = Deadline.formatRemaining(legSeconds ?? 0)
+            Log.say("auto", "started \(session) — marathon (\(total) total, \(leg) per leg, pid \(pid))")
+        } else {
+            Log.say("auto", "started \(session) (pid \(pid))")
+        }
         FileHandle.standardError.write(Data(
             "  → live progress: menu bar item, or `sift status` / `sift logs -f`\n".utf8
         ))

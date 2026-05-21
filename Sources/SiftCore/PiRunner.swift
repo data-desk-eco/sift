@@ -65,9 +65,15 @@ public enum PiRunner {
 
     /// Wire up everything pi needs: backend started, pi config written,
     /// system prompt assembled, env populated, session dir ensured.
+    ///
+    /// `legSubdir` is for marathon mode — when set, pi's session dir is
+    /// `<sessionDir>/.pi-sessions/<legSubdir>` instead of the shared
+    /// `.pi-sessions/`. Each leg gets a fresh conversation that way,
+    /// while report.md / findings.db / aleph.sqlite all stay shared.
     public static func prepare(
         sessionDir: URL, resuming: Bool,
-        deadline: Deadline?, skillDir: URL
+        deadline: Deadline?, skillDir: URL,
+        legSubdir: String? = nil
     ) async throws -> Prelaunch {
         try Sift.ensureInitialized()
         try requirePi()
@@ -94,7 +100,12 @@ public enum PiRunner {
         try Paths.ensure(researchDir)
         try Paths.ensure(sessionDir)
 
-        let piSessionDir = sessionDir.appending(path: ".pi-sessions")
+        let piSessionDir: URL
+        if let sub = legSubdir, !sub.isEmpty {
+            piSessionDir = sessionDir.appending(path: ".pi-sessions").appending(path: sub)
+        } else {
+            piSessionDir = sessionDir.appending(path: ".pi-sessions")
+        }
         let hasHistory: Bool
         if FileManager.default.fileExists(atPath: piSessionDir.path) {
             hasHistory = !((try? FileManager.default.contentsOfDirectory(atPath: piSessionDir.path)) ?? []).isEmpty
@@ -173,7 +184,8 @@ public enum PiRunner {
     /// headlessly.
     public static func spawnDaemon(
         sessionDir: URL, resuming: Bool,
-        prompt: String, deadline: Deadline?, debug: Bool
+        prompt: String, deadline: Deadline?,
+        marathonEnd: Int? = nil, debug: Bool
     ) throws -> pid_t {
         let exe = ProcessInfo.processInfo.arguments[0]
         // Resolve to absolute path so the child can find itself even if
@@ -199,6 +211,9 @@ public enum PiRunner {
                 "--deadline-start", String(dl.startTimestamp),
                 "--deadline-end",   String(dl.endTimestamp),
             ])
+        }
+        if let me = marathonEnd {
+            args.append(contentsOf: ["--marathon-end", String(me)])
         }
 
         // Use posix_spawnp with POSIX_SPAWN_SETSID so the child detaches
@@ -258,17 +273,7 @@ public enum PiRunner {
         } catch {
             throw SiftError("can't open \(logPath.path) for write")
         }
-
-        // UTC wall-clock prefix for every structured event line so a user
-        // tailing `auto.log` can see when each tool call / state change
-        // landed (and correlate across machines / timezones). Final-text
-        // dumps (the agent's multi-line prose) are written without a
-        // prefix so they read as natural paragraphs.
-        let tsFormatter = DateFormatter()
-        tsFormatter.dateFormat = "HH:mm:ss'Z'"
-        tsFormatter.locale = Locale(identifier: "en_US_POSIX")
-        tsFormatter.timeZone = TimeZone(identifier: "UTC")
-        func stamp() -> String { tsFormatter.string(from: Date()) }
+        let stamp = makeStamp()
 
         var state = RunState(
             session: prelaunch.session,
@@ -285,84 +290,12 @@ public enum PiRunner {
         }
         try RunRegistry.write(state)
 
-        let args = piBaseArgs(prelaunch: prelaunch) + ["-p", "--mode", "json", prompt]
-
-        let pi = Process()
-        pi.executableURL = URL(filePath: try resolveExecutable("pi"))
-        pi.arguments = args
-        pi.environment = prelaunch.env
-        pi.currentDirectoryURL = prelaunch.sessionDir
-
-        let stdoutPipe = Pipe()
-        let stderrPath = prelaunch.sessionDir.appending(path: "pi.stderr.log")
-        let stderrHandle = try RotatingLog.openForAppend(at: stderrPath)
-
-        pi.standardInput = FileHandle(forReadingAtPath: "/dev/null")
-        pi.standardOutput = stdoutPipe
-        pi.standardError = stderrHandle
-
-        try pi.run()
-
-        // Stream pi's stdout through the filter into the log + run state.
-        var stream = EventStream(debug: debug)
-        let reader = stdoutPipe.fileHandleForReading
-        var buffer = Data()
-        // Cap any single line so a runaway event payload can't OOM the
-        // daemon. Pi's JSON events are kilobytes in practice; 4 MiB
-        // covers tool-result blobs comfortably and discards the rest.
-        let maxLineBytes = 4 * 1024 * 1024
-        var dropping = false
-        while true {
-            let chunk = reader.availableData
-            if chunk.isEmpty { break }
-            buffer.append(chunk)
-            while let nlIndex = buffer.firstIndex(of: 0x0a) {
-                let lineData = buffer.subdata(in: 0..<nlIndex)
-                buffer.removeSubrange(0...nlIndex)
-                if dropping {
-                    // We just consumed the trailing newline of an oversized
-                    // line; pick up the next one fresh.
-                    dropping = false
-                    continue
-                }
-                guard let line = String(data: lineData, encoding: .utf8) else { continue }
-                for event in stream.ingest(line) {
-                    if !event.formatted.isEmpty {
-                        let rendered = event.isFinalText
-                            ? event.formatted + "\n"
-                            : "\(stamp()) \(event.formatted)\n"
-                        if let bytes = rendered.data(using: .utf8) {
-                            try? logHandle.write(contentsOf: bytes)
-                        }
-                    }
-                    if !event.scope.isEmpty, !event.isFinalText {
-                        // Skip clobber-protect: if `sift stop` flipped the
-                        // status to .stopped while we were reading the file,
-                        // don't write .running back over it.
-                        try? RunRegistry.updateIfRunning(prelaunch.session) { st in
-                            st.lastScope = event.scope
-                            st.lastMessage = event.message
-                            st.lastEventAt = Int(Date().timeIntervalSince1970)
-                        }
-                    }
-                }
-            }
-            // No newline yet but the buffer is past the cap — drop the
-            // partial line and ignore everything until the next newline.
-            if !dropping, buffer.count > maxLineBytes {
-                buffer.removeAll(keepingCapacity: false)
-                dropping = true
-                try? logHandle.write(contentsOf: Data(
-                    "\(stamp()) [stream]   dropped oversized event line\n".utf8
-                ))
-            }
-        }
-
-        pi.waitUntilExit()
+        let code = try driveOnePi(
+            prelaunch: prelaunch, prompt: prompt, debug: debug,
+            logHandle: logHandle, stamp: stamp
+        )
         try? logHandle.close()
-        try? stderrHandle.close()
 
-        let code = pi.terminationStatus
         let now = Int(Date().timeIntervalSince1970)
         try RunRegistry.update(prelaunch.session) { st in
             // If `sift stop` already flipped this to .stopped, keep that —
@@ -384,6 +317,258 @@ public enum PiRunner {
         // The menu bar app posts a native UNUserNotification when it
         // sees the run-state file flip out of `.running`.
         return code
+    }
+
+    /// Marathon mode: loop multiple fresh-context pi legs against the
+    /// same session dir. Between legs the system prompt is rebuilt for
+    /// the new leg's deadline, pi gets a leg-specific session subdir
+    /// (no `--continue`), and the agent picks up via the durable state
+    /// in `report.md` / `findings.db`. llama-server stays warm across
+    /// legs because the RunRegistry sees this daemon as still
+    /// `.running`.
+    public static func runMarathon(
+        sessionDir: URL, resuming: Bool,
+        legSeconds: Int, marathonEndTs: Int,
+        initialPrompt: String, debug: Bool,
+        skillDirURL: URL
+    ) async throws -> Int32 {
+        let logPath = sessionDir.appending(path: "auto.log")
+        let logHandle: FileHandle
+        do {
+            logHandle = try RotatingLog.openForAppend(at: logPath)
+        } catch {
+            throw SiftError("can't open \(logPath.path) for write")
+        }
+        let stamp = makeStamp()
+        let session = sessionDir.lastPathComponent
+
+        let marathonStart = Int(Date().timeIntervalSince1970)
+        var state = RunState(
+            session: session,
+            sessionDir: sessionDir.path,
+            logPath: logPath.path,
+            prompt: initialPrompt,
+            pid: getpid(),
+            startedAt: marathonStart
+        )
+        state.marathonEndTs = marathonEndTs
+        state.legNumber = 0  // bumped to 1 before leg 1 starts
+        try RunRegistry.write(state)
+
+        // Smallest leg we're willing to start — anything shorter is too
+        // little time for the agent to do useful work and just burns
+        // budget on warm-up.
+        let minLegSeconds = 60
+        // If a leg returns in under this many seconds we treat it as a
+        // flameout and stop the marathon — pi probably hit a crash loop
+        // and re-running with a fresh prompt won't help.
+        let minHealthyLegSeconds = 60
+
+        var legNumber = 0
+        var lastExitCode: Int32 = 0
+        var legSubdirCounter = 1
+        while true {
+            let now = Int(Date().timeIntervalSince1970)
+            let budgetRemaining = marathonEndTs - now
+            if budgetRemaining < minLegSeconds { break }
+            let thisLegSeconds = min(legSeconds, budgetRemaining)
+
+            legNumber += 1
+            let deadline = Deadline(
+                startTimestamp: now, endTimestamp: now + thisLegSeconds
+            )
+            // Leg 1 uses the shared `.pi-sessions` dir so `--resume` /
+            // `--continue` still picks up prior pi history. Leg 2+ get
+            // their own subdir so each restart is a clean context.
+            let legSubdir: String?
+            if legNumber == 1 {
+                legSubdir = nil
+            } else {
+                legSubdir = "leg-\(legSubdirCounter)"
+                legSubdirCounter += 1
+            }
+            let prelaunch = try await prepare(
+                sessionDir: sessionDir,
+                resuming: resuming && legNumber == 1,
+                deadline: deadline, skillDir: skillDirURL,
+                legSubdir: legSubdir
+            )
+            let legPrompt = legNumber == 1
+                ? initialPrompt
+                : continuationPrompt(original: initialPrompt, legNumber: legNumber)
+
+            // Surface the leg boundary in the log so the user can see
+            // where one leg ended and the next began.
+            let header = "\n\(stamp()) [marathon] leg \(legNumber) starting — \(Deadline.formatRemaining(thisLegSeconds)) deadline, \(Deadline.formatRemaining(budgetRemaining)) marathon budget remaining\n"
+            try? logHandle.write(contentsOf: Data(header.utf8))
+
+            try RunRegistry.update(session) { st in
+                st.legNumber = legNumber
+                st.deadlineTs = deadline.endTimestamp
+                st.deadlineStartTs = deadline.startTimestamp
+                st.lastScope = "marathon"
+                st.lastMessage = "leg \(legNumber) starting"
+                st.lastEventAt = Int(Date().timeIntervalSince1970)
+                // Re-arm status — between legs we may have briefly
+                // looked done from the menu bar's perspective, but the
+                // daemon is still alive.
+                if st.status != .stopped { st.status = .running }
+            }
+
+            let legStart = Int(Date().timeIntervalSince1970)
+            let code = try driveOnePi(
+                prelaunch: prelaunch, prompt: legPrompt, debug: debug,
+                logHandle: logHandle, stamp: stamp
+            )
+            lastExitCode = code
+            let legElapsed = Int(Date().timeIntervalSince1970) - legStart
+
+            // Stop the marathon if the user pulled the plug.
+            if let cur = RunRegistry.read(session), cur.status == .stopped {
+                try? logHandle.write(contentsOf: Data(
+                    "\(stamp()) [marathon] stopped by user after leg \(legNumber)\n".utf8
+                ))
+                break
+            }
+            // Pi crashed or exited non-zero — re-running with a fresh
+            // prompt is unlikely to help and would burn budget.
+            if code != 0 {
+                try? logHandle.write(contentsOf: Data(
+                    "\(stamp()) [marathon] leg \(legNumber) exited \(code) — stopping marathon\n".utf8
+                ))
+                break
+            }
+            // Flameout protection: pi exited cleanly but suspiciously
+            // fast. Almost always a startup failure that's invisible at
+            // the exit-code level (e.g. missing tool, prompt rejection).
+            if legElapsed < minHealthyLegSeconds {
+                try? logHandle.write(contentsOf: Data(
+                    "\(stamp()) [marathon] leg \(legNumber) finished in \(legElapsed)s — stopping (looks like a flameout)\n".utf8
+                ))
+                break
+            }
+        }
+
+        try? logHandle.close()
+        let endNow = Int(Date().timeIntervalSince1970)
+        try RunRegistry.update(session) { st in
+            if st.status != .stopped {
+                st.status = lastExitCode == 0 ? .finished : .failed
+            }
+            st.exitCode = lastExitCode
+            st.finishedAt = endNow
+            st.lastEventAt = endNow
+        }
+        ForgeProxy.stopIfIdle()
+        LlamaServer.stopLocalIfIdle()
+        return lastExitCode
+    }
+
+    // UTC wall-clock prefix for every structured event line so a user
+    // tailing `auto.log` can see when each tool call / state change
+    // landed (and correlate across machines / timezones). Final-text
+    // dumps (the agent's multi-line prose) are written without a
+    // prefix so they read as natural paragraphs.
+    private static func makeStamp() -> () -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss'Z'"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return { formatter.string(from: Date()) }
+    }
+
+    /// Run a single pi process to completion, streaming its event log
+    /// into `logHandle` and updating the run-state sidecar per event.
+    /// Returns pi's termination status. Used by both the one-shot
+    /// `runDaemon` and the looping `runMarathon` paths.
+    private static func driveOnePi(
+        prelaunch: Prelaunch, prompt: String, debug: Bool,
+        logHandle: FileHandle, stamp: @escaping () -> String
+    ) throws -> Int32 {
+        let args = piBaseArgs(prelaunch: prelaunch) + ["-p", "--mode", "json", prompt]
+
+        let pi = Process()
+        pi.executableURL = URL(filePath: try resolveExecutable("pi"))
+        pi.arguments = args
+        pi.environment = prelaunch.env
+        pi.currentDirectoryURL = prelaunch.sessionDir
+
+        let stdoutPipe = Pipe()
+        let stderrPath = prelaunch.sessionDir.appending(path: "pi.stderr.log")
+        let stderrHandle = try RotatingLog.openForAppend(at: stderrPath)
+
+        pi.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+        pi.standardOutput = stdoutPipe
+        pi.standardError = stderrHandle
+
+        try pi.run()
+
+        var stream = EventStream(debug: debug)
+        let reader = stdoutPipe.fileHandleForReading
+        var buffer = Data()
+        // Cap any single line so a runaway event payload can't OOM the
+        // daemon. Pi's JSON events are kilobytes in practice; 4 MiB
+        // covers tool-result blobs comfortably and discards the rest.
+        let maxLineBytes = 4 * 1024 * 1024
+        var dropping = false
+        while true {
+            let chunk = reader.availableData
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
+            while let nlIndex = buffer.firstIndex(of: 0x0a) {
+                let lineData = buffer.subdata(in: 0..<nlIndex)
+                buffer.removeSubrange(0...nlIndex)
+                if dropping {
+                    dropping = false
+                    continue
+                }
+                guard let line = String(data: lineData, encoding: .utf8) else { continue }
+                for event in stream.ingest(line) {
+                    if !event.formatted.isEmpty {
+                        let rendered = event.isFinalText
+                            ? event.formatted + "\n"
+                            : "\(stamp()) \(event.formatted)\n"
+                        if let bytes = rendered.data(using: .utf8) {
+                            try? logHandle.write(contentsOf: bytes)
+                        }
+                    }
+                    if !event.scope.isEmpty, !event.isFinalText {
+                        try? RunRegistry.updateIfRunning(prelaunch.session) { st in
+                            st.lastScope = event.scope
+                            st.lastMessage = event.message
+                            st.lastEventAt = Int(Date().timeIntervalSince1970)
+                        }
+                    }
+                }
+            }
+            if !dropping, buffer.count > maxLineBytes {
+                buffer.removeAll(keepingCapacity: false)
+                dropping = true
+                try? logHandle.write(contentsOf: Data(
+                    "\(stamp()) [stream]   dropped oversized event line\n".utf8
+                ))
+            }
+        }
+
+        pi.waitUntilExit()
+        try? stderrHandle.close()
+        return pi.terminationStatus
+    }
+
+    /// User prompt handed to pi at the start of every marathon leg
+    /// after the first. The system prompt + AGENTS.md already tell the
+    /// agent what report.md is for — this just anchors the leg: original
+    /// goal, point to durable state, set expectations for depth.
+    public static func continuationPrompt(original: String, legNumber: Int) -> String {
+        """
+        You are continuing this investigation across multiple fresh-context legs. The original task was:
+
+        \(original)
+
+        Your cwd holds your prior work — `report.md` and `findings.db`. Start by reading `report.md` to see what you've established and what threads are still open, then push the investigation deeper: verify weak claims with fresh searches, follow open questions you noted, broaden where useful. Keep updating `report.md` and `findings.db` as you go.
+
+        This is leg \(legNumber) of the marathon.
+        """
     }
 
     // MARK: - Helpers

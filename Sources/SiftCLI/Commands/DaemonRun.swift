@@ -19,6 +19,7 @@ struct DaemonRunCommand: AsyncParsableCommand {
     @Flag(name: .customLong("debug")) var debug: Bool = false
     @Option(name: .customLong("deadline-start")) var deadlineStart: Int?
     @Option(name: .customLong("deadline-end")) var deadlineEnd: Int?
+    @Option(name: .customLong("marathon-end")) var marathonEnd: Int?
 
     func run() async throws {
         SystemPrompt.resourceFinder = { siftCLIResources() }
@@ -32,14 +33,29 @@ struct DaemonRunCommand: AsyncParsableCommand {
 
         do {
             let dir = URL(filePath: sessionDir)
-            let prelaunch = try await PiRunner.prepare(
-                sessionDir: dir, resuming: resuming,
-                deadline: deadline, skillDir: skillDir()
-            )
-            FileManager.default.changeCurrentDirectoryPath(prelaunch.sessionDir.path)
-            let code = try await PiRunner.runDaemon(
-                prelaunch: prelaunch, prompt: prompt, debug: debug
-            )
+            // For marathon runs the leg loop owns prepare() — it needs
+            // to rebuild the system prompt and pi session dir per leg.
+            // Outside marathon we keep the original one-shot flow.
+            FileManager.default.changeCurrentDirectoryPath(dir.path)
+            let code: Int32
+            if let endTs = marathonEnd {
+                code = try await PiRunner.runMarathon(
+                    sessionDir: dir, resuming: resuming,
+                    legSeconds: deadline?.totalSeconds ?? (30 * 60),
+                    marathonEndTs: endTs,
+                    initialPrompt: prompt, debug: debug,
+                    skillDirURL: skillDir()
+                )
+            } else {
+                let prelaunch = try await PiRunner.prepare(
+                    sessionDir: dir, resuming: resuming,
+                    deadline: deadline, skillDir: skillDir()
+                )
+                FileManager.default.changeCurrentDirectoryPath(prelaunch.sessionDir.path)
+                code = try await PiRunner.runDaemon(
+                    prelaunch: prelaunch, prompt: prompt, debug: debug
+                )
+            }
             throw ExitCode(code)
         } catch let exit as ExitCode {
             throw exit
