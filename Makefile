@@ -98,6 +98,7 @@ prune-pi:
 
 uninstall:
 	@rm -f $(BINDIR)/sift
+	@rm -rf $(BINDIR)/Sift_SiftCLI.bundle
 	@rm -rf $(APPDIR)/$(APP_BUNDLE)
 	@rm -rf "$(SUPPORT_DIR)"
 	@echo "uninstalled. ~/.sift (vault, models, sessions) is untouched — remove it manually if you're done with sift."
@@ -105,7 +106,13 @@ uninstall:
 install-cli: cli
 	@mkdir -p $(BINDIR)
 	@install -m 0755 $(BUILD_DIR)/sift $(BINDIR)/sift
-	@echo "cli      -> $(BINDIR)/sift"
+	@# SPM emits the resource bundle alongside the binary in .build/.
+	@# `sift auto` discovers AGENTS.md / SKILL.md via executableDir +
+	@# Sift_SiftCLI.bundle, so the bundle has to ride along with the
+	@# CLI into ~/.local/bin or the daemon can't build its system prompt.
+	@rm -rf $(BINDIR)/Sift_SiftCLI.bundle
+	@cp -R $(BUILD_DIR)/Sift_SiftCLI.bundle $(BINDIR)/Sift_SiftCLI.bundle
+	@echo "cli      -> $(BINDIR)/sift (+ Sift_SiftCLI.bundle)"
 
 install-app: app
 	@# Quit any running copy first so the freshly installed binary is

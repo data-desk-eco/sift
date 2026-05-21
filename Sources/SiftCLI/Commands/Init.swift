@@ -62,6 +62,14 @@ struct InitCommand: SiftSubcommand {
             try await chooseBackendInteractive()
         }
 
+        // Run after the backend block so a re-init on an existing local
+        // install (where chooseBackendInteractive is skipped) still gets
+        // forge cached. Idempotent: subsequent runs are a no-op once the
+        // wheel is in uv's cache.
+        if let cfg = Backend.readConfig(), cfg.kind == .local {
+            try ForgeProxy.ensureForge()
+        }
+
         if !FileManager.default.fileExists(atPath: Paths.projectFile.path) {
             let desc = promptUser("\nBriefly describe the project (data source and subject):")
                 .trimmingCharacters(in: .whitespacesAndNewlines)

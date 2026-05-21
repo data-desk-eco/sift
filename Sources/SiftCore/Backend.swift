@@ -6,10 +6,11 @@ import Foundation
 public enum Backend {
 
     public static let defaultLocalPort = 1234
+    public static let defaultProxyPort = ForgeProxy.defaultProxyPort
     public static let defaultModelFile = "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf"
     public static let defaultModelName = "qwen3.6-35b-a3b"
     public static let defaultModelDisplay = "Qwen3.6 35B A3B (local)"
-    public static let localContextWindow = 262_144
+    public static let localContextWindow = 131_072
 
     // MARK: - Config
 
@@ -102,8 +103,10 @@ public enum Backend {
         let display: String
         switch config.kind {
         case .local:
-            let port = config.port ?? defaultLocalPort
-            baseURL = "http://127.0.0.1:\(port)/v1"
+            // Point pi at the forge proxy, not llama-server directly.
+            // PiRunner.prepare() brings both processes up before this
+            // runs, so the proxy is always reachable on `defaultProxyPort`.
+            baseURL = "http://127.0.0.1:\(defaultProxyPort)/v1"
             apiKey = "sift-local"
             display = defaultModelDisplay
         case .hosted:

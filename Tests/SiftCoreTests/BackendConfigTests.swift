@@ -51,4 +51,22 @@ import Testing
             #expect(perms == 0o600)
         }
     }
+
+    @Test func configurePiPointsLocalAtForgePort() throws {
+        // Pi must hit the forge proxy port, not the llama-server port —
+        // forge sits in front of llama-server on the local backend.
+        try withTempHome { home in
+            try Backend.writeLocal()
+            try Backend.configurePi()
+
+            let modelsPath = home.appending(path: "pi/models.json")
+            let data = try Data(contentsOf: modelsPath)
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let providers = json?["providers"] as? [String: Any]
+            let sift = providers?["sift"] as? [String: Any]
+            let baseURL = sift?["baseUrl"] as? String
+
+            #expect(baseURL == "http://127.0.0.1:\(Backend.defaultProxyPort)/v1")
+        }
+    }
 }

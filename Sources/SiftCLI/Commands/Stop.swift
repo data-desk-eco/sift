@@ -57,7 +57,9 @@ struct StopCommand: SiftSubcommand {
         }
         // Belt-and-braces: the daemon also calls stopLocalIfIdle on
         // exit, but a SIGTERM'd daemon may not run cleanup, so we
-        // double up here. Idempotent — no-op if already stopped.
+        // double up here. Idempotent — no-op if already stopped. Forge
+        // first so it doesn't briefly probe a dying llama-server.
+        ForgeProxy.stopIfIdle()
         LlamaServer.stopLocalIfIdle()
     }
 }
