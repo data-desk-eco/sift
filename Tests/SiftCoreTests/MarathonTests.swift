@@ -44,6 +44,43 @@ import Testing
         }
     }
 
+    @Test func reportLooksMissingDetectsAbsentAndStubFiles() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appending(path: "sift-report-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // No report at all: definitely missing.
+        #expect(PiRunner.reportLooksMissing(sessionDir: dir))
+
+        let report = dir.appending(path: "report.md")
+        // Empty file (touch): also treated as missing.
+        try Data().write(to: report)
+        #expect(PiRunner.reportLooksMissing(sessionDir: dir))
+
+        // Trivial stub under the threshold: still missing.
+        try Data("# Report\n".utf8).write(to: report)
+        #expect(PiRunner.reportLooksMissing(sessionDir: dir))
+
+        // Substantial content: not missing — wrap-up should skip it.
+        let real = String(repeating: "x", count: PiRunner.reportMinBytes + 10)
+        try Data(real.utf8).write(to: report)
+        #expect(!PiRunner.reportLooksMissing(sessionDir: dir))
+    }
+
+    @Test func wrapUpPromptMentionsReportAndStyle() {
+        let p = PiRunner.wrapUpPrompt
+        // Must name the file the agent has to produce.
+        #expect(p.contains("report.md"))
+        // Must remind the agent to use what it already has — opening
+        // new searches at wrap-up time would burn the wrap-up budget
+        // on tool calls instead of writing.
+        #expect(p.lowercased().contains("don't open new") || p.lowercased().contains("do not open new"))
+        // Must point at the style guide so the wrap-up output matches
+        // a normal report (citations, neutral tone).
+        #expect(p.contains("citations") || p.contains("citation"))
+    }
+
     @Test func nonMarathonRunStateLeavesLegFieldsNil() throws {
         try withTempHome { home in
             let root = home.appending(path: "research")

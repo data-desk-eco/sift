@@ -294,6 +294,13 @@ public enum PiRunner {
             prelaunch: prelaunch, prompt: prompt, debug: debug,
             logHandle: logHandle, stamp: stamp
         )
+
+        await runWrapUpIfNeeded(
+            sessionDir: prelaunch.sessionDir, session: prelaunch.session,
+            originalExitCode: code, skillDir: prelaunch.skillDir,
+            legSubdir: nil, debug: debug,
+            logHandle: logHandle, stamp: stamp
+        )
         try? logHandle.close()
 
         let now = Int(Date().timeIntervalSince1970)
@@ -367,6 +374,9 @@ public enum PiRunner {
         var legNumber = 0
         var lastExitCode: Int32 = 0
         var legSubdirCounter = 1
+        // Track the most recently used pi session subdir so the post-loop
+        // wrap-up can --continue from the same context the last leg ran in.
+        var lastLegSubdir: String?
         while true {
             let now = Int(Date().timeIntervalSince1970)
             let budgetRemaining = marathonEndTs - now
@@ -387,6 +397,7 @@ public enum PiRunner {
                 legSubdir = "leg-\(legSubdirCounter)"
                 legSubdirCounter += 1
             }
+            lastLegSubdir = legSubdir
             let prelaunch = try await prepare(
                 sessionDir: sessionDir,
                 resuming: resuming && legNumber == 1,
@@ -449,6 +460,12 @@ public enum PiRunner {
             }
         }
 
+        await runWrapUpIfNeeded(
+            sessionDir: sessionDir, session: session,
+            originalExitCode: lastExitCode, skillDir: skillDirURL,
+            legSubdir: lastLegSubdir, debug: debug,
+            logHandle: logHandle, stamp: stamp
+        )
         try? logHandle.close()
         let endNow = Int(Date().timeIntervalSince1970)
         try RunRegistry.update(session) { st in
@@ -553,6 +570,80 @@ public enum PiRunner {
         pi.waitUntilExit()
         try? stderrHandle.close()
         return pi.terminationStatus
+    }
+
+    // MARK: - Report wrap-up
+
+    /// Minimum size we treat as a real attempt at a report. Anything
+    /// smaller (a `touch`ed file, a one-line stub, an empty header) is
+    /// indistinguishable from "the agent never wrote one" and we'd
+    /// rather re-prompt than ship it. Stays well below the size of a
+    /// single legitimate paragraph.
+    static let reportMinBytes = 50
+
+    /// True when report.md is absent or under `reportMinBytes`. Used to
+    /// decide whether to give pi a second turn to wrap up.
+    public static func reportLooksMissing(sessionDir: URL) -> Bool {
+        let url = sessionDir.appending(path: "report.md")
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attrs?[.size] as? Int else { return true }
+        return size < reportMinBytes
+    }
+
+    /// Soft deadline handed to the wrap-up pi run. Long enough that the
+    /// agent doesn't feel rushed into a one-sentence file, short enough
+    /// to bound the recovery if pi misbehaves.
+    static let wrapUpDeadlineSeconds = 10 * 60
+
+    /// One-shot user message handed to pi when the original run exited
+    /// without producing report.md. The agent reconnects via --continue
+    /// so it has its full investigation context — this prompt just
+    /// names the failure and asks it to fix it.
+    public static let wrapUpPrompt = """
+        The investigation just finished but report.md in this session directory is missing or empty. Write it now from what you already gathered in this conversation, following the style described in the system prompt: neutral wire-service tone, descriptive section headers, full paragraphs with alias citations, markdown tables for structured data, and open questions plus suggested next steps at the end. Don't open new investigation threads — the report should reflect what you already know. Write the file, then stop.
+        """
+
+    /// If report.md is missing after pi exits, give pi one more turn
+    /// via --continue and the `wrapUpPrompt`. Best-effort: any error
+    /// here is logged but not propagated, since this is a recovery
+    /// step and the original run's exit code is what the user asked
+    /// about. Skipped when pi crashed (re-running is unlikely to
+    /// help), when the user stopped the run, or when report.md is
+    /// already substantive.
+    private static func runWrapUpIfNeeded(
+        sessionDir: URL, session: String,
+        originalExitCode: Int32, skillDir: URL,
+        legSubdir: String?, debug: Bool,
+        logHandle: FileHandle, stamp: @escaping () -> String
+    ) async {
+        guard originalExitCode == 0 else { return }
+        if RunRegistry.read(session)?.status == .stopped { return }
+        guard reportLooksMissing(sessionDir: sessionDir) else { return }
+
+        try? logHandle.write(contentsOf: Data(
+            "\n\(stamp()) [wrap-up] report.md missing — re-prompting pi\n".utf8
+        ))
+        do {
+            let deadline = Deadline(seconds: wrapUpDeadlineSeconds)
+            let prelaunch = try await prepare(
+                sessionDir: sessionDir, resuming: true,
+                deadline: deadline, skillDir: skillDir,
+                legSubdir: legSubdir
+            )
+            _ = try driveOnePi(
+                prelaunch: prelaunch, prompt: wrapUpPrompt, debug: debug,
+                logHandle: logHandle, stamp: stamp
+            )
+            if reportLooksMissing(sessionDir: sessionDir) {
+                try? logHandle.write(contentsOf: Data(
+                    "\(stamp()) [wrap-up] pi finished but report.md is still missing\n".utf8
+                ))
+            }
+        } catch {
+            try? logHandle.write(contentsOf: Data(
+                "\(stamp()) [wrap-up] failed: \(error.localizedDescription)\n".utf8
+            ))
+        }
     }
 
     /// User prompt handed to pi at the start of every marathon leg
