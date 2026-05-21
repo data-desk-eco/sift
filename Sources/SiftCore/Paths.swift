@@ -14,6 +14,10 @@ public enum Paths {
     public static var projectFile: URL { siftHome.appending(path: "project.md") }
     public static var initMarker: URL { siftHome.appending(path: ".initialized") }
     public static var systemPromptFile: URL { siftHome.appending(path: "system-prompt.md") }
+    /// Persistent KV-cache directory passed to llama-server's --slot-save-path.
+    /// Lets the next `sift auto` skip prompt eval for the shared system-prompt
+    /// prefix instead of re-paying the ~30 s cold-start cost.
+    public static var kvCacheDir: URL { siftHome.appending(path: "kv-cache") }
 
     /// Legacy install location for sift-owned tooling. Kept so that
     /// dev installs via `make install` still work (they drop pi here);

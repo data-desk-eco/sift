@@ -52,6 +52,26 @@ import Testing
         }
     }
 
+    @Test func kvCacheFilenameIncludesModelAndVersion() {
+        // The filename llama-server's --slot-save-path writes to must
+        // include both the model stem and the cache-format version, so
+        // swapping models OR bumping the format silently invalidates
+        // stale slots without us having to wipe the dir manually.
+        let name = LlamaServer.kvCacheFilename(modelFile: "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf")
+        #expect(name.contains("Qwen3_6-35B-A3B-UD-Q2_K_XL"))
+        #expect(name.contains("v\(LlamaServer.kvCacheVersion)"))
+        #expect(name.hasSuffix(".bin"))
+    }
+
+    @Test func kvCacheFilenamesDifferByModel() {
+        // Two different model files must get different slot files —
+        // otherwise restoring after a model swap would try to apply a
+        // KV slot built for the wrong tensor shapes.
+        let a = LlamaServer.kvCacheFilename(modelFile: "model-a.gguf")
+        let b = LlamaServer.kvCacheFilename(modelFile: "model-b.gguf")
+        #expect(a != b)
+    }
+
     @Test func configurePiPointsLocalAtForgePort() throws {
         // Pi must hit the forge proxy port, not the llama-server port —
         // forge sits in front of llama-server on the local backend.

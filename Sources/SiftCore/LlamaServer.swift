@@ -9,6 +9,13 @@ public enum LlamaServer {
 
     public static let defaultModelRepo = "unsloth/Qwen3.6-35B-A3B-GGUF"
 
+    /// Bump when the llama-server startup args below change in any way
+    /// that affects KV cache layout (ctx size, KV quant, flash-attn, the
+    /// model arch via a defaultModelFile change). The version is part of
+    /// the on-disk cache filename, so a bump silently invalidates every
+    /// stale slot file the next time `sift auto` runs.
+    public static let kvCacheVersion = 1
+
     // MARK: - Process lifecycle
 
     public static func healthCheck(port: Int, timeout: TimeInterval = 1) -> Bool {
@@ -68,6 +75,7 @@ public enum LlamaServer {
                 suggestion: "run 'sift init' to download it"
             )
         }
+        try? Paths.ensure(Paths.kvCacheDir)
         let logPath = Paths.siftHome.appending(path: "llama-server.log")
         let pidPath = Paths.siftHome.appending(path: "llama-server.pid")
         Log.say("server", "starting llama-server on :\(port)")
@@ -89,6 +97,10 @@ public enum LlamaServer {
             "--no-webui",
             "--ctx-size", String(Backend.localContextWindow),
             "--reasoning-budget", "16384",
+            "--flash-attn", "on",
+            "--cache-type-k", "q8_0",
+            "--cache-type-v", "q8_0",
+            "--slot-save-path", Paths.kvCacheDir.path,
             "--alias", config.modelName,
         ]
         proc.standardOutput = logHandle
@@ -103,6 +115,11 @@ public enum LlamaServer {
             Thread.sleep(forTimeInterval: 1.0)
             if healthCheck(port: port) {
                 Log.say("server", "ready")
+                // Best-effort: warm the slot from disk so the first agent
+                // request skips ~30 s of cold prompt-eval on the system
+                // prompt. Missing or stale cache files just leave the
+                // slot empty, which is the previous behaviour.
+                restorePromptCache(port: port, modelFile: modelPath.lastPathComponent)
                 return
             }
         }
@@ -140,6 +157,16 @@ public enum LlamaServer {
               let pid = pid_t(raw),
               kill(pid, 0) == 0
         else { return }
+        // Persist whatever KV state the slot ended this session with, so
+        // the next start can restore it and skip cold prompt eval. Must
+        // happen before SIGTERM — once the server is gone the state is
+        // unrecoverable. Best-effort: a failed save just means the next
+        // start pays the cold cost (the previous behaviour).
+        if let config = Backend.readConfig(), config.kind == .local {
+            let port = config.port ?? Backend.defaultLocalPort
+            let modelFile = config.modelFile ?? Backend.defaultModelFile
+            savePromptCache(port: port, modelFile: modelFile)
+        }
         Log.say("server", "stopping llama-server (pid \(pid))")
         kill(pid, SIGTERM)
         // Give it ~2s to exit cleanly, then SIGKILL if still around.
@@ -193,6 +220,77 @@ public enum LlamaServer {
             "-o", partial.path, resolved,
         ])
         try FileManager.default.moveItem(at: partial, to: modelPath)
+    }
+
+    // MARK: - KV prefix cache (slot persistence)
+
+    /// Filename llama-server writes to / reads from inside
+    /// `--slot-save-path`. Keyed on model + cache version so that
+    /// swapping models or bumping the version invalidates stale slots
+    /// without us having to clear the dir.
+    public static func kvCacheFilename(modelFile: String) -> String {
+        let stem = (modelFile as NSString).deletingPathExtension
+            .replacingOccurrences(of: ".", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        return "sift-prefix-v\(kvCacheVersion)-\(stem).bin"
+    }
+
+    /// POST /slots/0?action=save. Best-effort: swallows errors so a
+    /// failed save can't block the stop path.
+    private static func savePromptCache(port: Int, modelFile: String) {
+        let filename = kvCacheFilename(modelFile: modelFile)
+        guard let url = URL(string: "http://127.0.0.1:\(port)/slots/0?action=save")
+        else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data("{\"filename\":\"\(filename)\"}".utf8)
+        req.timeoutInterval = 15
+        let sem = DispatchSemaphore(value: 0)
+        var ok = false
+        URLSession.shared.dataTask(with: req) { _, response, _ in
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                ok = true
+            }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + 15)
+        if ok {
+            Log.say("server", "saved KV prefix cache (\(filename))")
+        }
+    }
+
+    /// POST /slots/0?action=restore. No-op when the file isn't on disk
+    /// (first run, or after `kvCacheVersion` was bumped).
+    private static func restorePromptCache(port: Int, modelFile: String) {
+        let filename = kvCacheFilename(modelFile: modelFile)
+        let kvFile = Paths.kvCacheDir.appending(path: filename)
+        guard FileManager.default.fileExists(atPath: kvFile.path) else { return }
+        guard let url = URL(string: "http://127.0.0.1:\(port)/slots/0?action=restore")
+        else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data("{\"filename\":\"\(filename)\"}".utf8)
+        // Restoring a multi-GB slot can take a few seconds on a cold cache.
+        req.timeoutInterval = 30
+        let sem = DispatchSemaphore(value: 0)
+        var ok = false
+        URLSession.shared.dataTask(with: req) { _, response, _ in
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                ok = true
+            }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + 30)
+        if ok {
+            Log.say("server", "restored KV prefix cache")
+        } else {
+            // Corrupt or incompatible (e.g. user swapped llama.cpp versions);
+            // wipe so we don't keep retrying it every start.
+            try? FileManager.default.removeItem(at: kvFile)
+            Log.say("server", "discarded stale KV prefix cache")
+        }
     }
 
     // MARK: - Internal
