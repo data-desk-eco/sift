@@ -33,10 +33,10 @@ import Testing
     }
 
     @Test func leadDirIgnoredWhenNew() throws {
-        // With --new, resolveSession bypasses both the lead and most-recent
-        // paths; the CLI builds the fresh session dir itself once it has a
-        // slug. The fallthrough lands on "default" — that's just a marker
-        // that the caller is responsible for naming.
+        // With newSession: true, resolveSession bypasses both the lead and
+        // most-recent paths; the CLI builds the fresh session dir itself once
+        // it has a slug. The fallthrough lands on "default" — that's just a
+        // marker that the caller is responsible for naming.
         let dir = try makeResearch([("recent", Date())])
         defer { try? FileManager.default.removeItem(at: dir) }
         let lead = dir.appending(path: "pinned")

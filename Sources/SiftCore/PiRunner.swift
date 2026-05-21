@@ -45,9 +45,9 @@ public enum PiRunner {
     public static func resolveSession(
         researchDir: URL, newSession: Bool, leadDir: URL? = nil
     ) -> SessionResolution {
-        // Active lead — if the user has pinned one — wins over "most
-        // recent" so a typed `sift auto` always lands on the same
-        // investigation until they explicitly --new or `sift lead --clear`.
+        // When asked to resume, the active lead — if the user has pinned one —
+        // wins over "most recent" so `sift auto --resume` lands on the same
+        // investigation the user has pinned via `sift lead`.
         if !newSession, let leadDir {
             return SessionResolution(sessionDir: leadDir, resuming: true, staleAge: nil)
         }

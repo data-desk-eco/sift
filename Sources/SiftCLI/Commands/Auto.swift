@@ -13,8 +13,10 @@ struct AutoCommand: SiftSubcommand {
             / `sift logs -f` from the terminal. Without PROMPT, drops into pi's
             interactive REPL (foreground).
 
-            On a fresh lead, sift asks for a slug interactively; pass --slug to
-            skip the prompt (required when stdin isn't a TTY).
+            Starts a new lead by default and asks for a slug interactively;
+            pass --resume to continue the active lead (or the most recent one)
+            instead. Pass --slug NAME to skip the slug prompt (required when
+            stdin isn't a TTY).
             """
     )
 
@@ -26,9 +28,9 @@ struct AutoCommand: SiftSubcommand {
     @Option(name: [.short, .customLong("time-limit")],
             help: "soft deadline (e.g. 30m, 1h30m, 90s); the agent self-paces")
     var timeLimit: String?
-    @Flag(name: [.short, .customLong("new")],
-          help: "start a fresh lead instead of continuing the most recent one")
-    var new: Bool = false
+    @Flag(name: [.short, .customLong("resume")],
+          help: "continue the active lead (or most recent) instead of starting fresh")
+    var resume: Bool = false
     @Option(name: .customLong("slug"),
             help: "name for a fresh lead (skips the interactive prompt)")
     var slug: String?
@@ -49,43 +51,37 @@ struct AutoCommand: SiftSubcommand {
 
         let promptText = prompt.joined(separator: " ")
 
-        // If interactive REPL: figure out resume / fresh; build prelaunch; execve into pi.
         let mp = try requireVault()
         let researchDir = mp.appending(path: "research")
         try Paths.ensure(researchDir)
 
-        // The active lead wins over "most recent" so the user can pin
-        // a particular investigation and have every `sift auto`
-        // invocation default back to it. `ActiveLead.get()` already
-        // gates on the named dir existing inside the research root,
-        // so a renamed / deleted lead falls through to "most recent"
-        // rather than silently re-creating an empty session.
+        // --resume picks the user's pinned lead first, then falls back to the
+        // most recent session on disk. `ActiveLead.get()` already gates on the
+        // named dir existing inside the research root, so a renamed / deleted
+        // lead falls through to "most recent" rather than silently re-creating
+        // an empty session under the stale name.
         let leadDir: URL? = ActiveLead.get().map { researchDir.appending(path: $0) }
 
-        let canResume = !new && (leadDir != nil
-            || PiRunner.mostRecentSession(researchDir: researchDir) != nil)
-
         let resolution: PiRunner.SessionResolution
-        if promptText.isEmpty || canResume {
-            // REPL, or detached run that should land on an existing
-            // session — let PiRunner pick lead → most-recent → default.
-            resolution = PiRunner.resolveSession(
-                researchDir: researchDir,
-                newSession: new, leadDir: leadDir
+        if resume {
+            let candidate = PiRunner.resolveSession(
+                researchDir: researchDir, newSession: false, leadDir: leadDir
             )
+            if candidate.resuming {
+                resolution = candidate
+            } else {
+                // -r with nothing on disk to resume — fall through to a fresh
+                // lead so the command still does what the user meant rather
+                // than aborting on a clean install.
+                Log.say("auto", "no lead to resume — starting a new one")
+                resolution = try freshLead(
+                    researchDir: researchDir, prompt: promptText
+                )
+            }
         } else {
-            // Fresh detached lead — pick a slug (CLI flag, then prompt,
-            // then fall back to a timestamp), then suffix `-2`/`-3` if
-            // the directory already exists.
-            let base = try chooseFreshSlug(explicit: slug, prompt: promptText)
-            let name = PiRunner.uniqueName(researchDir: researchDir, base: base)
-            resolution = PiRunner.SessionResolution(
-                sessionDir: researchDir.appending(path: name),
-                resuming: false, staleAge: nil
+            resolution = try freshLead(
+                researchDir: researchDir, prompt: promptText
             )
-            // Pin a fresh lead as the active one — that's almost always
-            // what the user wants next.
-            ActiveLead.set(name)
         }
 
         // Foreground REPL.
@@ -105,7 +101,7 @@ struct AutoCommand: SiftSubcommand {
         if resolution.resuming {
             let session = resolution.sessionDir.lastPathComponent
             if let stale = resolution.staleAge {
-                Log.say("auto", "resuming \(session) (\(stale) since last activity — pass --new if this is a different investigation)")
+                Log.say("auto", "resuming \(session) (\(stale) since last activity — drop --resume if this is a different investigation)")
             } else {
                 Log.say("auto", "resuming \(session)")
             }
@@ -124,6 +120,23 @@ struct AutoCommand: SiftSubcommand {
         FileHandle.standardError.write(Data(
             "  → live progress: menu bar item, or `sift status` / `sift logs -f`\n".utf8
         ))
+    }
+}
+
+extension AutoCommand {
+    /// Build a fresh `SessionResolution`: pick a slug (CLI flag → derived
+    /// from prompt → interactive prompt → timestamp), suffix `-2`/`-3` on
+    /// collision, and pin the new lead as the active one.
+    fileprivate func freshLead(
+        researchDir: URL, prompt: String
+    ) throws -> PiRunner.SessionResolution {
+        let base = try chooseFreshSlug(explicit: slug, prompt: prompt)
+        let name = PiRunner.uniqueName(researchDir: researchDir, base: base)
+        ActiveLead.set(name)
+        return PiRunner.SessionResolution(
+            sessionDir: researchDir.appending(path: name),
+            resuming: false, staleAge: nil
+        )
     }
 }
 

@@ -26,10 +26,10 @@ struct InvestigateSubjectIntent: AppIntent {
                default: "")
     var timeLimit: String
 
-    @Parameter(title: "New lead",
-               description: "Force a fresh lead instead of continuing the most recent one.",
+    @Parameter(title: "Resume previous lead",
+               description: "Continue the active lead (or most recent) instead of starting a new one.",
                default: false)
-    var newSession: Bool
+    var resume: Bool
 
     @Parameter(title: "Lead slug",
                description: "Optional name for a fresh lead (kebab-case, letters/digits/-/_/.). Leave blank to use a default derived from the subject.",
@@ -46,7 +46,7 @@ struct InvestigateSubjectIntent: AppIntent {
 
         let cli = try resolveSiftBinary()
         var args = ["auto"]
-        if newSession { args.append("--new") }
+        if resume { args.append("--resume") }
         let trimmedDeadline = timeLimit.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedDeadline.isEmpty {
             args.append(contentsOf: ["-t", trimmedDeadline])
