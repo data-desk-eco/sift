@@ -132,9 +132,16 @@ extension AutoCommand {
     ) throws -> PiRunner.SessionResolution {
         let base = try chooseFreshSlug(explicit: slug, prompt: prompt)
         let name = PiRunner.uniqueName(researchDir: researchDir, base: base)
+        let sessionDir = researchDir.appending(path: name)
+        // Create the dir before pinning the lead — `ActiveLead.get()`
+        // gates on `sessionDir` existing, and the daemon doesn't create
+        // it until after llama-server has warmed (seconds to minutes on
+        // a cold model load). Without this, `sift status`, `sift logs`,
+        // and `sift stop` all see "no active lead" right after launch.
+        try Paths.ensure(sessionDir)
         ActiveLead.set(name)
         return PiRunner.SessionResolution(
-            sessionDir: researchDir.appending(path: name),
+            sessionDir: sessionDir,
             resuming: false, staleAge: nil
         )
     }
