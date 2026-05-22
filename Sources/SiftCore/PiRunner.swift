@@ -600,7 +600,7 @@ public enum PiRunner {
     /// so it has its full investigation context — this prompt just
     /// names the failure and asks it to fix it.
     public static let wrapUpPrompt = """
-        The investigation just finished but report.md in this session directory is missing or empty. Write it now from what you already gathered in this conversation, following the style described in the system prompt: neutral wire-service tone, descriptive section headers, full paragraphs with alias citations, markdown tables for structured data, and open questions plus suggested next steps at the end. Don't open new investigation threads — the report should reflect what you already know. Write the file, then stop.
+        The investigation just finished but report.md in this session directory is missing or empty. Write it now from what you already gathered in this conversation, following the style described in the system prompt: neutral wire-service tone, descriptive section headers, full paragraphs with alias citations and short verbatim quotes (≤30 words) for load-bearing claims, markdown tables for structured data, and open questions plus suggested next steps at the end. Pull the specific phrasing of the documents you read into the report — paraphrase-only paragraphs lose the evidence. Don't open new investigation threads — the report should reflect what you already know. Write the file, then stop.
         """
 
     /// If report.md is missing after pi exits, give pi one more turn
@@ -657,6 +657,8 @@ public enum PiRunner {
         \(original)
 
         Your cwd holds your prior work — `report.md` and `findings.db`. Start by reading `report.md` to see what you've established and what threads are still open, then push the investigation deeper: verify weak claims with fresh searches, follow open questions you noted, broaden where useful. Keep updating `report.md` and `findings.db` as you go.
+
+        Anything you read in this leg with `sift read --full` should leave a trace in `report.md` before you stop — a short verbatim quote (≤30 words) plus the alias, or a row in `findings.db` for structured items. The next leg starts with a fresh context and only sees what's on disk; paraphrased summary that drops the source phrasing means the detail is gone.
 
         This is leg \(legNumber) of the marathon.
         """
