@@ -79,7 +79,6 @@ public enum PiRunner {
         try requirePi()
 
         try LlamaServer.start()
-        try ForgeProxy.start()
         try Backend.configurePi()
 
         let dlNote = deadline.map { dl in
@@ -317,9 +316,7 @@ public enum PiRunner {
         }
         // If this was the last running session, free the local llama
         // model from unified memory — otherwise it keeps ~14 GB pinned
-        // and the rest of the Mac runs slowly. Tear down forge first so
-        // it doesn't briefly fire health checks at a dead llama-server.
-        ForgeProxy.stopIfIdle()
+        // and the rest of the Mac runs slowly.
         LlamaServer.stopLocalIfIdle()
         // The menu bar app posts a native UNUserNotification when it
         // sees the run-state file flip out of `.running`.
@@ -476,7 +473,6 @@ public enum PiRunner {
             st.finishedAt = endNow
             st.lastEventAt = endNow
         }
-        ForgeProxy.stopIfIdle()
         LlamaServer.stopLocalIfIdle()
         return lastExitCode
     }

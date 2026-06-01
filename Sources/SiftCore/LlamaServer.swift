@@ -14,7 +14,7 @@ public enum LlamaServer {
     /// model arch via a defaultModelFile change). The version is part of
     /// the on-disk cache filename, so a bump silently invalidates every
     /// stale slot file the next time `sift auto` runs.
-    public static let kvCacheVersion = 1
+    public static let kvCacheVersion = 2
 
     // MARK: - Process lifecycle
 
@@ -100,6 +100,11 @@ public enum LlamaServer {
             "--flash-attn", "on",
             "--cache-type-k", "q8_0",
             "--cache-type-v", "q8_0",
+            // Force full Metal offload rather than trusting the implicit
+            // default, and restrict to the 4 performance cores — the M2's
+            // 4 efficiency cores drag prompt-eval when included.
+            "--n-gpu-layers", "99",
+            "--threads", "4",
             "--slot-save-path", Paths.kvCacheDir.path,
             "--alias", config.modelName,
         ]

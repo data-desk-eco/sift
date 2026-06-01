@@ -72,9 +72,8 @@ import Testing
         #expect(a != b)
     }
 
-    @Test func configurePiPointsLocalAtForgePort() throws {
-        // Pi must hit the forge proxy port, not the llama-server port —
-        // forge sits in front of llama-server on the local backend.
+    @Test func configurePiPointsLocalAtLlamaPort() throws {
+        // Pi must hit llama-server directly on the local backend.
         try withTempHome { home in
             try Backend.writeLocal()
             try Backend.configurePi()
@@ -86,7 +85,7 @@ import Testing
             let sift = providers?["sift"] as? [String: Any]
             let baseURL = sift?["baseUrl"] as? String
 
-            #expect(baseURL == "http://127.0.0.1:\(Backend.defaultProxyPort)/v1")
+            #expect(baseURL == "http://127.0.0.1:\(Backend.defaultLocalPort)/v1")
         }
     }
 }
