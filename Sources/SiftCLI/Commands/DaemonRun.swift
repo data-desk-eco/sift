@@ -37,6 +37,25 @@ struct DaemonRunCommand: AsyncParsableCommand {
             // to rebuild the system prompt and pi session dir per leg.
             // Outside marathon we keep the original one-shot flow.
             FileManager.default.changeCurrentDirectoryPath(dir.path)
+            // Write a `.running` sidecar BEFORE prepare(). prepare() blocks
+            // on a cold llama-server boot (seconds to minutes) and throws if
+            // it fails; without an early sidecar that whole window — and any
+            // boot failure — is invisible to `sift status`/`sift lead`/the
+            // menu bar, and the catch handler's `update` (which only mutates
+            // an existing sidecar) has nothing to mark failed. runMarathon
+            // and runDaemon both overwrite this with their fuller state.
+            var initial = RunState(
+                session: dir.lastPathComponent,
+                sessionDir: dir.path,
+                logPath: dir.appending(path: "auto.log").path,
+                prompt: prompt,
+                pid: getpid(),
+                startedAt: Int(Date().timeIntervalSince1970),
+                deadlineTs: deadline?.endTimestamp,
+                deadlineStartTs: deadline?.startTimestamp
+            )
+            initial.marathonEndTs = marathonEnd
+            try? RunRegistry.write(initial)
             let code: Int32
             if let endTs = marathonEnd {
                 code = try await PiRunner.runMarathon(
