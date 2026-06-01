@@ -26,4 +26,24 @@ public enum Session {
     public static func openStore() throws -> Store {
         try Store(dbPath: try dbPath())
     }
+
+    /// Resolve the findings DB — the agent's own FtM entity store:
+    ///   1. `SIFT_FINDINGS_DB` (set by the daemon, per session)
+    ///   2. `ALEPH_SESSION_DIR/findings.db`
+    ///   3. a `findings.db` sibling of the cache DB (one-shot CLI use)
+    public static func findingsDbPath() throws -> URL {
+        let env = ProcessInfo.processInfo.environment
+        if let override = env["SIFT_FINDINGS_DB"], !override.isEmpty {
+            return URL(filePath: (override as NSString).expandingTildeInPath)
+        }
+        if let base = env["ALEPH_SESSION_DIR"], !base.isEmpty {
+            return URL(filePath: (base as NSString).expandingTildeInPath)
+                .appending(path: "findings.db")
+        }
+        return try dbPath().deletingLastPathComponent().appending(path: "findings.db")
+    }
+
+    public static func openFindings() throws -> FindingsStore {
+        try FindingsStore(dbPath: try findingsDbPath())
+    }
 }

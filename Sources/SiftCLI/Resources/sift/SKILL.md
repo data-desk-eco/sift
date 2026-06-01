@@ -19,8 +19,8 @@ $VAULT_MOUNT/
                           # entity in every session on this vault.
     <session>/            # one subdir per logical session (notes, reports)
       report.md           # whatever you write — exports, timelines, etc.
-      findings.db         # $SIFT_FINDINGS_DB — your structured extractions
-                          # (per-session SQLite, never shared across sessions)
+      findings.db         # $SIFT_FINDINGS_DB — your FtM findings, via
+                          # `sift entity` (per-session, never shared)
       auto.log            # filtered live log of the agent run
       pi.stderr.log       # raw pi process stderr
       .pi-sessions/       # pi's own conversation state
@@ -207,25 +207,34 @@ Use `--list` first to see what's available. Lead names are the directory names t
 
 ## Recording structured findings
 
-When you extract a structured item worth keeping — a trade, transaction, vessel, person, payment — append it to `$SIFT_FINDINGS_DB` rather than burying it in prose. The file is a per-session SQLite database that lives next to `report.md` in the session dir, so it's encrypted in the vault along with everything else. The user can dump it to CSV, open it in Datasette, or join it against `aleph.sqlite` later.
+When you extract a structured fact worth keeping — a company, a person, a payment, an ownership link — record it as a [FollowTheMoney](https://followthemoney.tech) entity with `sift entity`, the same schema Aleph itself uses. Findings get their own aliases (`f1`, `f2`, …), so the next leg can browse them without re-reading sources, and they export straight back into Aleph.
 
-```bash
-sqlite3 "$SIFT_FINDINGS_DB" "CREATE TABLE IF NOT EXISTS trades (
-  id INTEGER PRIMARY KEY,
-  buyer TEXT, seller TEXT, volume_bbl INTEGER, date TEXT,
-  source_alias TEXT
-)"
-sqlite3 "$SIFT_FINDINGS_DB" \
-  "INSERT INTO trades(buyer, seller, volume_bbl, date, source_alias)
-   VALUES ('Acme', 'X Corp', 50000, '2024-03-12', 'd3491')"
+```
+sift entity schemas                  # list FtM schemas
+sift entity schemas Payment          # one schema's properties (refs marked)
+sift entity create <Schema> -p k=v   # create from key=value props (repeatable)
+sift entity create --json '<ftm>'    # or pass a full FtM entity as JSON
+sift entity list [--schema X]        # browse findings (--json for raw FtM)
+sift entity show f3 [--json]         # one finding in full
+sift entity edit f3 -p amount=75000  # set/--remove props in place
+sift entity delete f3                # remove (blocked if still referenced)
+```
+
+Example — a payment between two parties you read about in `r512`:
+
+```
+sift entity create Company -p name="Acme Holdings" -p jurisdiction=cy
+sift entity create Person  -p firstName=John -p lastName=Doe
+sift entity create Payment -p payer=f1 -p beneficiary=f2 \
+  -p amount=50000 -p currency=USD -p date=2024-03-12 --source r512
 ```
 
 Conventions:
 
-- One table per kind of thing (`trades`, `vessels`, `payments`, `people`).
-- Always include a `source_alias` column referencing the alias you saw the row in (`r5`, `d3491`, …) so the user can audit and re-open the source.
-- Don't design the schema up front. As new fields appear, run `ALTER TABLE <name> ADD COLUMN <field> <type>` — sqlite handles this fine and existing rows just get `NULL` for the new column.
-- This is your scratchpad, not Aleph's mirror — denormalised columns, free-text notes, confidence scores, whatever helps the user is fair game.
+- **Reference other entities by alias.** Ref-typed properties (`payer`, `owner`, `member`, `organization`, …) take a findings alias (`f1`), an Aleph alias (`r512`), or a raw id — sift resolves them so the graph stays connected. `sift entity schemas <Schema>` marks which properties are refs.
+- **Cite the source.** `--source r512` records where the fact came from; `sift read r512` then shows which findings cite it, so a later leg sees your prior judgement inline.
+- **Pick the right schema.** Relationships (Payment, Ownership, Directorship, Membership, …) are edges between two parties; the rest are things (Person, Company, BankAccount, …). Unknown schemas are rejected; an unknown property is kept with a warning so a registry gap never blocks you.
+- This is for *structured* facts. Keep narrative and the verbatim quotes that back load-bearing claims in `report.md`.
 
 ## Pacing
 

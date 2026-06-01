@@ -10,7 +10,8 @@ public struct ReadInput: Sendable {
 }
 
 public func runRead(
-    client: AlephClient, store: Store, input: ReadInput
+    client: AlephClient, store: Store, input: ReadInput,
+    findings: FindingsStore? = nil
 ) async throws -> String {
     let eid = try store.resolveAlias(input.alias)
 
@@ -71,6 +72,11 @@ public func runRead(
     let rawTo = Render.extractLabel(props["to"])
     if !rawTo.isEmpty, props["recipients"] == nil {
         lines.append("to:       \(rawTo)")
+    }
+
+    if let findings, let cites = try? findings.citing(sourceId: eid), !cites.isEmpty {
+        let refs = cites.map { "\($0.alias) \($0.schema)" }.joined(separator: ", ")
+        lines.append("findings: \(refs)")
     }
 
     lines.append(Render.rule)

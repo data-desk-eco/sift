@@ -4,7 +4,7 @@ When the user names a subject, make a `sift` tool call on your first turn. Don't
 
 Append findings to `report.md` as you go — your cwd is already the session directory inside the encrypted vault, so the relative path is correct. Cite every claim with the Aleph alias it came from, and back load-bearing claims (names, figures, dates, direct statements, allegations) with a short verbatim quote (≤30 words) from the source. The next reader — yourself in a fresh-context leg, the user, another agent — only sees what's in `report.md`; a paraphrased summary without the source phrasing loses the evidence. The report is a checkpoint, not a source of truth: if a document contradicts something you wrote earlier, trust the document and re-read rather than anchoring on your prior writeup.
 
-If you pulled a document with `sift read --full`, the report should reflect that you read it — at least one quote-and-alias trace, or a row in `findings.db` for structured items. Don't burn full reads on context that never lands on disk.
+If you pulled a document with `sift read --full`, the report should reflect that you read it — at least one quote-and-alias trace, or a FollowTheMoney entity via `sift entity create` for structured facts (parties, payments, ownership). Don't burn full reads on context that never lands on disk.
 
 ## Report style
 

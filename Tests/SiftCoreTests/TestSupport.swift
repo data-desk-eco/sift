@@ -195,3 +195,24 @@ func tempStore(label: String = "test") throws -> (Store, URL) {
     let store = try Store(dbPath: dir.appending(path: "store.sqlite"))
     return (store, dir)
 }
+
+/// Open a fresh in-tmp `FindingsStore` alongside its directory. Caller
+/// cleans up the directory in a `defer`.
+func tempFindings(label: String = "findings") throws -> (FindingsStore, URL) {
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "sift-\(label)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let store = try FindingsStore(dbPath: dir.appending(path: "findings.db"))
+    return (store, dir)
+}
+
+/// A `Store` + `FindingsStore` pair in one temp dir — the two stores the
+/// `sift entity` runners need.
+func tempStores(label: String = "entity") throws -> (Store, FindingsStore, URL) {
+    let dir = FileManager.default.temporaryDirectory
+        .appending(path: "sift-\(label)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let aleph = try Store(dbPath: dir.appending(path: "aleph.sqlite"))
+    let findings = try FindingsStore(dbPath: dir.appending(path: "findings.db"))
+    return (aleph, findings, dir)
+}
