@@ -146,6 +146,13 @@ public enum Backend {
         let settings: [String: Any] = [
             "defaultProvider": "sift",
             "defaultModel": config.modelName,
+            // Disable pi's auto-compaction. The sweep keeps each session
+            // short (fresh context per phase, read discipline, a hard
+            // step cap), so it should never approach the window — and a
+            // lossy mid-session summarisation on this hardware costs more
+            // than it saves. A session that does run long ends cleanly on
+            // the step cap rather than silently compacting.
+            "compaction": ["enabled": false],
         ]
 
         try writePrettyJSON(models, to: Paths.piConfigDir.appending(path: "models.json"))

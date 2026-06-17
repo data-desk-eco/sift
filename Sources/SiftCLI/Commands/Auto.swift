@@ -52,6 +52,14 @@ struct AutoCommand: SiftSubcommand {
     /// Run a consolidation pass after this many topics complete.
     static let consolidateEvery = 3
 
+    // Hard per-session tool-call backstops. These are runaway guards, not
+    // leashes — set well above a healthy session (topics here run ~15-25
+    // calls) so the prompt and deadline are the normal stop, and the cap
+    // only fires on a session that won't stop itself.
+    static let topicMaxSteps = 80
+    static let planMaxSteps = 80
+    static let metaMaxSteps = 50
+
     func execute() async throws {
         let perTopic = try timeLimit.map(Deadline.parseDuration) ?? 20 * 60
         let briefURL = URL(filePath: (list as NSString).expandingTildeInPath).absoluteURL
@@ -100,7 +108,8 @@ struct AutoCommand: SiftSubcommand {
                 deadline: Deadline(seconds: perTopic)
             )
             let code = try PiRunner.drivePi(
-                prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir), debug: debug
+                prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir),
+                debug: debug, maxSteps: Self.topicMaxSteps
             )
             if code != 0 { Log.say("auto", "pi exited \(code) on this topic — continuing") }
             Worklist.markDone(at: topicsURL, topic: topic)
@@ -133,7 +142,8 @@ struct AutoCommand: SiftSubcommand {
             runDir: runDir, topicsURL: topicsURL, slug: "plan", deadline: nil
         )
         _ = try PiRunner.drivePi(
-            prelaunch: pre, prompt: Self.planPrompt(String(raw.prefix(20000))), debug: debug
+            prelaunch: pre, prompt: Self.planPrompt(String(raw.prefix(20000))),
+            debug: debug, maxSteps: Self.planMaxSteps
         )
     }
 
@@ -145,7 +155,9 @@ struct AutoCommand: SiftSubcommand {
         let pre = try await prepareMeta(
             runDir: runDir, topicsURL: topicsURL, slug: slug, deadline: nil
         )
-        _ = try PiRunner.drivePi(prelaunch: pre, prompt: prompt, debug: debug)
+        _ = try PiRunner.drivePi(
+            prelaunch: pre, prompt: prompt, debug: debug, maxSteps: Self.metaMaxSteps
+        )
     }
 
     /// Shared prelaunch wiring: fresh pi context (`legSubdir`), and the

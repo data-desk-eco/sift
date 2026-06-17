@@ -54,16 +54,16 @@ public struct EventStream {
             return [Line(scope: "agent", message: "start", formatted: log("agent", "start"))]
 
         case "tool_execution_start":
-            let name = (event["toolName"] as? String) ?? "?"
             let preview = argsPreview(event["args"])
-            let msg = "\(name): \(preview)"
+            // The agent only ever shells out (`bash` running `sift …`), so
+            // the tool name is noise — show just the command.
+            let msg = toolLabel(event["toolName"], preview)
             return [Line(scope: "tool", message: msg, formatted: log("tool", msg))]
 
         case "tool_execution_end":
             if (event["isError"] as? Bool) == true {
-                let name = (event["toolName"] as? String) ?? "?"
                 let result = short(string(event["result"]), to: 160)
-                let msg = "\(name): \(result)"
+                let msg = toolLabel(event["toolName"], result)
                 return [Line(scope: "tool!", message: msg, formatted: log("tool!", msg))]
             }
             return []
@@ -140,6 +140,13 @@ public struct EventStream {
         case nil, is NSNull: return ""
         case let v?: return "\(v)"
         }
+    }
+
+    /// Drop the redundant `bash:` prefix — the agent only ever shells out.
+    /// Any other tool (should it appear) keeps its `name: detail` form.
+    private func toolLabel(_ name: Any?, _ detail: String) -> String {
+        let n = string(name)
+        return (n.isEmpty || n == "bash") ? detail : "\(n): \(detail)"
     }
 
     private func argsPreview(_ args: Any?) -> String {

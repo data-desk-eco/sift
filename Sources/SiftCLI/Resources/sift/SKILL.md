@@ -31,8 +31,8 @@ Issue sift commands serially, never in parallel. Every call writes the shared `a
 Flags are POSIX-style (`sift <cmd> --help` for the full list); short forms `-l`/`--limit`, `-f`/`--full`, `-r`/`--raw`, `-o`/`--offset`. The query or alias is positional.
 
 **Search & read**
-- `search "<text>" [--type emails|docs|people|orgs|any] [--collection <id>] [--emitter|--recipient|--mentions <alias>] [--date-from|--date-to YYYY-MM-DD]` — hits, each with an alias; page with `--offset`.
-- `read <alias> [-f] [-r]` — full content (`-f` un-truncates the body). Also lists any findings that cite this entity.
+- `search "<text>" [--type emails|docs|people|orgs|any] [--collection <id>] [--emitter|--recipient|--mentions <alias>] [--date-from|--date-to YYYY-MM-DD]` — hits, each with an alias; page with `--offset`. Keep `--limit` modest (10–20) — big result tables cost context too.
+- `read <alias>` — content with the body truncated to ~1500 chars, usually enough to judge relevance. Add `-f` only once you've decided a document is worth its full text — full bodies are the biggest drain on your context, so don't reach for it by default. `-r` dumps raw FtM JSON. Also lists any findings that cite this entity.
 
 **Pivot**
 - `expand <alias> [--property <name>]` — entities linked via FtM refs. For a party, use `search --recipient <alias>` (expand only returns counts).

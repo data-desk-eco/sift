@@ -122,10 +122,23 @@ public enum PiRunner {
     /// headlessly (`-p --mode json`); we parse its JSON event stream and
     /// echo rendered lines to stderr so the operator sees searches and
     /// findings land in real time. Returns pi's termination status.
+    ///
+    /// `maxSteps` is a hard backstop: when the agent has made that many
+    /// tool calls we end the session (SIGTERM). pi has no step/token cap
+    /// of its own and the soft deadline has no teeth in `--print` mode,
+    /// so on this hardware a session that won't stop itself just gets
+    /// slower as its context grows. Findings commit to findings.db the
+    /// moment they're recorded, so ending a session mid-step loses only
+    /// the in-flight call, not recorded work. The cap is a backstop —
+    /// the prompt and deadline should normally stop the agent first.
     public static func drivePi(
-        prelaunch: Prelaunch, prompt: String, debug: Bool
+        prelaunch: Prelaunch, prompt: String, debug: Bool, maxSteps: Int? = nil
     ) throws -> Int32 {
-        let args = piBaseArgs(prelaunch: prelaunch) + ["-p", "--mode", "json", prompt]
+        // `--no-session`: every sweep phase is a fresh, never-resumed
+        // context, so persisting pi's conversation (and the compaction it
+        // runs on save) is wasted work — minutes per topic on this
+        // hardware. Ephemeral sessions skip both.
+        let args = piBaseArgs(prelaunch: prelaunch) + ["--no-session", "-p", "--mode", "json", prompt]
         let stamp = makeStamp()
 
         let pi = Process()
@@ -151,7 +164,8 @@ public enum PiRunner {
         // Cap any single line so a runaway event payload can't OOM us.
         let maxLineBytes = 4 * 1024 * 1024
         var dropping = false
-        while true {
+        var steps = 0, capped = false
+        readLoop: while true {
             let chunk = reader.availableData
             if chunk.isEmpty { break }
             buffer.append(chunk)
@@ -160,13 +174,23 @@ public enum PiRunner {
                 buffer.removeSubrange(0...nlIndex)
                 if dropping { dropping = false; continue }
                 guard let line = String(data: lineData, encoding: .utf8) else { continue }
-                for event in stream.ingest(line) where !event.formatted.isEmpty {
+                for event in stream.ingest(line) {
+                    if event.scope == "tool" { steps += 1 }
+                    guard !event.formatted.isEmpty else { continue }
                     let rendered = event.isFinalText
                         ? event.formatted + "\n"
                         : "\(stamp()) \(event.formatted)\n"
                     if let bytes = rendered.data(using: .utf8) {
                         try? out.write(contentsOf: bytes)
                     }
+                }
+                if let cap = maxSteps, steps >= cap {
+                    capped = true
+                    try? out.write(contentsOf: Data(
+                        "\(stamp()) [limit]   \(cap) tool calls — ending this session\n".utf8
+                    ))
+                    pi.terminate()
+                    break readLoop
                 }
             }
             if !dropping, buffer.count > maxLineBytes {
@@ -180,7 +204,8 @@ public enum PiRunner {
 
         pi.waitUntilExit()
         try? stderrHandle.close()
-        return pi.terminationStatus
+        // A capped session is a clean stop on our terms, not a failure.
+        return capped ? 0 : pi.terminationStatus
     }
 
     // MARK: - Helpers
