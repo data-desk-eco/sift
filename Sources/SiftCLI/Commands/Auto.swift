@@ -57,7 +57,7 @@ struct AutoCommand: SiftSubcommand {
     // calls) so the prompt and deadline are the normal stop, and the cap
     // only fires on a session that won't stop itself.
     static let topicMaxSteps = 80
-    static let planMaxSteps = 80
+    static let planMaxSteps = 40
     static let metaMaxSteps = 50
 
     func execute() async throws {
@@ -208,18 +208,19 @@ struct AutoCommand: SiftSubcommand {
     static func planPrompt(_ brief: String) -> String {
         """
         You're setting up an investigation from the operator's brief (below). \
-        First, scout the collection: run a handful of `sift search` calls (and \
-        `sift sources` if you don't know what's loaded) to see what's actually \
-        there on these subjects — which names, entities, and threads return \
-        hits, and which return nothing. Then build a worklist of concrete, \
-        searchable leads grounded in what you found: favour angles that \
-        returned promising hits, split a subject that's clearly large into \
-        separate leads, and drop angles the collection has nothing on. Add \
-        each lead with `sift queue "<lead>"`, one call per lead — specific \
-        enough to search but not so granular they fragment. This is \
-        reconnaissance, not the investigation: a dozen-odd searches is plenty, \
-        and don't read deeply or record findings yet. Build the worklist, \
-        then stop.
+        Scout the collection briefly — a handful of `sift search` calls (and \
+        `sift sources` if you don't know what's loaded) to see which names, \
+        entities, and threads return hits and which return nothing. Queue \
+        leads AS YOU GO, not at the end: the moment a search confirms an angle \
+        is worth a pass, add it with `sift queue "<lead>"` — one call per \
+        lead, a single line of plain text (no newlines, keep quotes balanced), \
+        specific enough to search but not so granular it fragments. Favour \
+        angles that returned promising hits, split a clearly large subject \
+        into separate leads, and drop angles the collection has nothing on. \
+        This is reconnaissance, not the investigation: keep it to roughly a \
+        dozen searches, don't read deeply or record findings, and make sure \
+        every lead is queued before you stop — an empty worklist means the \
+        run does nothing.
 
         BRIEF:
 
