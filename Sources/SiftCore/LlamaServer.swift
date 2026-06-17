@@ -55,18 +55,12 @@ public enum LlamaServer {
         let port = config.port ?? Backend.defaultLocalPort
         if healthCheck(port: port) {
             // A long-lived llama-server accumulates KV cache state and
-            // gets progressively slower — second-and-later auto sessions
-            // were taking minutes to produce their first token. If no
-            // other auto session is currently using it, kill the stale
-            // server so this run gets a clean boot. Concurrent sessions
-            // (rare) still share the warm one.
-            if RunRegistry.active().isEmpty {
-                Log.say("server", "recycling stale llama-server on :\(port)")
-                stopLocal()
-            } else {
-                Log.say("server", "already up on :\(port)")
-                return
-            }
+            // gets progressively slower — second-and-later topic sessions
+            // were taking minutes to produce their first token. `auto`
+            // runs one pi at a time, so a server already on the port is
+            // always stale: kill it so this topic gets a clean boot.
+            Log.say("server", "recycling stale llama-server on :\(port)")
+            stopLocal()
         }
         let modelPath = Paths.modelsDir.appending(path: config.modelFile ?? Backend.defaultModelFile)
         guard FileManager.default.fileExists(atPath: modelPath.path) else {
@@ -182,11 +176,9 @@ public enum LlamaServer {
         kill(pid, SIGKILL)
     }
 
-    /// Stop llama-server only when no other auto sessions are still
-    /// running. Safe to call from `sift stop` and from the daemon's
-    /// post-pi cleanup — the last one out turns off the lights.
+    /// Stop llama-server. Called by `auto` once its topic sweep finishes
+    /// so the model stops pinning ~14 GB of unified memory.
     public static func stopLocalIfIdle() {
-        if !RunRegistry.active().isEmpty { return }
         stopLocal()
     }
 

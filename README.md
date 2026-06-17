@@ -40,32 +40,34 @@ SETUP SUBCOMMANDS:
                           agent's system prompt.
 
 AUTO SUBCOMMANDS:
-  auto                    Run the agent. Returns to the shell once a detached
-                          run starts.
-  lead                    Show or switch the active lead.
-  status                  Show running and recently-finished leads.
-  logs                    Tail the active lead's log (or the named lead's).
-  stop                    Stop the running lead's agent.
+  auto                    Sweep a list of topics through the collection, one
+                          agent per topic.
 ```
 
 The Aleph and memory subcommands are the working surface. Each one takes a query or an alias and prints results to stdout; results from one command (`r5`, `d3491`, …) feed straight into the next. Aliases are stable across sessions on the same vault, so `r5` resolves to the same entity tomorrow. Responses are cached locally, so re-running the same call is free.
 
 `sift <command> --help` lists flags for any subcommand.
 
-## Driving the tools in a loop
+## Sweeping a list of topics
 
-The same tools can be driven by an LLM. `sift auto "PROMPT"` starts an agent with the Aleph and memory commands available to it, lets it search, read, and expand its way through the collection, and writes a report at the end.
+The same tools can be driven by an LLM. `sift auto LIST.txt` takes a worklist — one topic per line — and works through it sequentially: for each topic it boots a fresh, short-lived agent that searches, reads, and pivots through the collection, then records what it finds as [FollowTheMoney](https://followthemoney.tech) entities.
 
 ```bash
-sift auto "investigate Acme Corp in the Pandora Papers"
-sift auto -t 30m "trace shipments from X to Y in the leaked manifests"
+cat > sanctions.txt <<'EOF'
+EU 833/2014 Art. 3 — dual-use goods/technology to Russia
+EU 833/2014 Art. 5 — sovereign-debt and securities restrictions
+designated banks: Bank Rossiya, SMP Bank
+EOF
+
+sift auto sanctions.txt          # sweep every line, one agent each
+sift auto -t 30m sanctions.txt   # 30 minutes per topic
 ```
 
-The run detaches and returns to the shell. `sift status` shows active and recent leads; `sift logs -f` tails the live transcript; the menu bar app surfaces the same state and notifies on completion. Reports land inside the vault — `sift report` prints the markdown, `sift report --format html` renders it with live links to the source entities.
+Each topic gets its own bounded context, so the local model never bogs down dragging one investigation's history into the next — the reason the sweep beats a single long-running agent on a laptop. Findings accumulate in a shared `findings.db` and a running `report.md`; every few topics a consolidation pass distils progress into a digest that's fed forward. An agent that surfaces a fresh lead appends it to the worklist with `sift queue`, so the sweep grows as it goes. The worklist file is the only state — open it mid-run and you see what's done (`✓`), what's pending, and what's been discovered.
 
-The agent runs against either a local LLM (Qwen3 35B via [llama.cpp](https://github.com/ggml-org/llama.cpp), so only Aleph traffic leaves the machine) or any OpenAI-compatible hosted endpoint. Toggle with `sift backend local|hosted`.
+`findings.db` is FollowTheMoney all the way down, so you can upload it straight back into Aleph to thread your findings into the existing entity graph.
 
-`sift auto` is built on the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) harness; the bundled skill file documents the tool surface and a few Aleph quirks for the model.
+The agent runs against either a local LLM (Qwen3 via [llama.cpp](https://github.com/ggml-org/llama.cpp), so only Aleph traffic leaves the machine) or any OpenAI-compatible hosted endpoint. Toggle with `sift backend local|hosted`. It's built on the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) harness; the bundled skill file documents the tool surface and a few Aleph quirks for the model.
 
 ## Quick start
 
@@ -74,12 +76,10 @@ brew install --cask data-desk-eco/tap/sift
 
 sift init                              # vault, Aleph creds, LLM backend
 sift search "acme corp"                # use the tools directly, or:
-sift auto "investigate Acme Corp"      # let the agent drive
+sift auto topics.txt                   # let the agent sweep a worklist
 ```
 
 `sift init` creates an encrypted sparseimage at `~/.sift/.vault.sparseimage` and asks for a passphrase. The passphrase is prompted on first use after each reboot and never persisted — losing it is unrecoverable. Aleph keys, the response cache, and every report live inside the vault.
-
-The menu bar app registers an **Investigate Subject** App Intent for Shortcuts, Siri, and Raycast.
 
 ## Requirements
 
@@ -95,7 +95,7 @@ git clone https://github.com/data-desk-eco/sift && cd sift
 make install
 ```
 
-`make install` builds, ad-hoc signs, and drops the CLI in `~/.local/bin/sift` and the app in `/Applications/Sift.app`. `make uninstall` reverses it; the vault under `~/.sift/` is preserved. `make test` runs the suite via [swift-testing](https://github.com/swiftlang/swift-testing) — no Xcode required.
+`make install` builds and drops the CLI in `~/.local/bin/sift` (plus the pi harness in `~/Library/Application Support/Sift/`). `make uninstall` reverses it; the vault under `~/.sift/` is preserved. `make test` runs the suite via [swift-testing](https://github.com/swiftlang/swift-testing) — no Xcode required.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for a tour of the codebase and [`CHANGELOG.md`](CHANGELOG.md) for release notes.
 

@@ -8,7 +8,6 @@ struct SiftRoot: AsyncParsableCommand {
         commandName: "sift",
         abstract: "Investigate subjects in Aleph or OpenAleph from your Mac.",
         version: Sift.version,
-        subcommands: [DaemonRunCommand.self],
         groupedSubcommands: [
             // Agent-facing tools (also fine to call interactively).
             CommandGroup(name: "Aleph", subcommands: [
@@ -32,9 +31,11 @@ struct SiftRoot: AsyncParsableCommand {
                 ReportCommand.self,
                 TimeCommand.self,
             ]),
-            // Structured findings: the agent's own FtM entities.
+            // Structured findings: the agent's own FtM entities, plus the
+            // worklist tool it uses to queue freshly surfaced leads.
             CommandGroup(name: "Findings", subcommands: [
                 EntityCommand.self,
+                QueueCommand.self,
             ]),
             // Human-facing — manage your sift install + auto runs.
             CommandGroup(name: "Setup", subcommands: [
@@ -45,10 +46,6 @@ struct SiftRoot: AsyncParsableCommand {
             ]),
             CommandGroup(name: "Auto", subcommands: [
                 AutoCommand.self,
-                LeadCommand.self,
-                StatusCommand.self,
-                LogsCommand.self,
-                StopCommand.self,
             ]),
         ]
     )

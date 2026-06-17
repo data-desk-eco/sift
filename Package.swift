@@ -12,7 +12,6 @@ let package = Package(
     products: [
         .library(name: "SiftCore", targets: ["SiftCore"]),
         .executable(name: "sift", targets: ["SiftCLI"]),
-        .executable(name: "sift-menubar", targets: ["SiftMenuBar"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git",
@@ -50,12 +49,6 @@ let package = Package(
                 // pi requires (the --skill dir name must match the skill name).
                 .copy("Resources"),
             ],
-            swiftSettings: [.swiftLanguageMode(.v5)]
-        ),
-        .executableTarget(
-            name: "SiftMenuBar",
-            dependencies: ["SiftCore"],
-            path: "Sources/SiftMenuBar",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

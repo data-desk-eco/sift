@@ -17,24 +17,28 @@ $VAULT_MOUNT/
     aleph.sqlite          # SHARED across sessions: aliases, entity cache,
                           # response cache. Same alias resolves to the same
                           # entity in every session on this vault.
-    <session>/            # one subdir per logical session (notes, reports)
-      report.md           # whatever you write — exports, timelines, etc.
+    <run>/                # one dir per worklist sweep (named after the file)
+      report.md           # running narrative — SHARED across the sweep's
+                          # topic sessions; read it to see what prior
+                          # topics established
       findings.db         # $SIFT_FINDINGS_DB — your FtM findings, via
-                          # `sift entity` (per-session, never shared)
-      auto.log            # filtered live log of the agent run
+                          # `sift entity`; shared across the whole sweep
+      digest.md           # periodic consolidation, prepended to your prompt
       pi.stderr.log       # raw pi process stderr
-      .pi-sessions/       # pi's own conversation state
+      .pi-sessions/       # pi's own per-topic conversation state
 ```
+
+You are one session in a **sweep**: the operator gave `sift auto` a list of topics and handed you exactly one of them (named in your first message). Investigate it, record findings as FollowTheMoney entities that cite the real leak documents they came from, and if you surface other leads worth chasing, queue them with `sift queue "<lead>"` for a later session. `report.md` and `findings.db` persist across the whole sweep — build on what's already there rather than repeating it.
 
 API keys live in the encrypted vault (`<vault>/secrets.json`). `sift auto` injects `ALEPH_URL` and `ALEPH_API_KEY` into your environment automatically, so you do not need to read the file yourself.
 
 ## Off-limits commands
 
-The sift CLI also exposes setup and run-management commands (`sift init`, `sift vault`, `sift backend`, `sift project`, `sift auto`, `sift lead`, `sift status`, `sift logs`, `sift stop`). **These are for the human operator, not for you.** Never invoke them — you'll either prompt the user for the vault passphrase, fork another agent, or stop your own run.
+The sift CLI also exposes setup and run commands (`sift init`, `sift vault`, `sift backend`, `sift project`, `sift auto`). **These are for the human operator, not for you.** Never invoke them — you'll prompt the user for the vault passphrase or fork another sweep.
 
 Aleph creds are already in your environment as `$ALEPH_URL` / `$ALEPH_API_KEY`. Don't try to open `<vault>/secrets.json` yourself — the file is intentionally human-only.
 
-If you need information about the current run (deadline, session dir, available aliases), or about prior investigations on the same vault, use the agent-facing commands documented below: `sift time`, `sift recall`, `sift sql`, `sift cache stats`, `sift report`.
+If you need information about the current run (deadline, available aliases) or about what this sweep has found so far, use the agent-facing commands documented below: `sift time`, `sift recall`, `sift sql`, `sift cache stats`, `sift report`. To hand a freshly surfaced lead to a later session, use `sift queue`.
 
 ## Aliases
 
@@ -195,15 +199,25 @@ Reports DB size, row counts per table, and the age range of cached responses. Us
 
 ### `report`
 
-Read a prior lead's `report.md` to consolidate findings across investigations on the same vault. The vault stores one lead per directory under `$ALEPH_SESSION_DIR`, each with its own `report.md`; this command cats the markdown to stdout so you can search it inline.
+Cat a `report.md` to stdout so you can read it inline. With no argument it prints this sweep's report (your cwd) — use it at the start of a topic to see what earlier topics established. Each sweep is a directory under `$ALEPH_SESSION_DIR` with its own `report.md`.
 
 ```
-sift report --list                # leads with a report.md (sorted by recency)
-sift report <lead>                # cat that lead's report.md
-sift report                       # cat the current lead's report.md
+sift report --list                # sweeps with a report.md (sorted by recency)
+sift report <run>                 # cat that sweep's report.md
+sift report                       # cat this sweep's report.md
 ```
 
-Use `--list` first to see what's available. Lead names are the directory names that appear in `$ALEPH_SESSION_DIR/<lead>/`. Validation rejects path traversal, so you can't escape the research directory.
+Validation rejects path traversal, so you can't escape the research directory.
+
+### `queue`
+
+Hand a freshly surfaced lead to a later session in this sweep. The topic gets appended to the worklist `sift auto` is working through.
+
+```
+sift queue "Bank Rossiya correspondent accounts"
+```
+
+Use it when a document points you at a person, company, or thread that deserves its own focused pass but is outside your current topic. Duplicates are ignored. Don't queue your own topic back, and don't queue so aggressively that the sweep never converges — one or two strong leads per session, not every name you see.
 
 ## Recording structured findings
 

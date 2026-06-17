@@ -4,6 +4,33 @@ All notable changes to sift land here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Reworked `sift auto` from a single long-running agent into a
+**topic sweep**, and stripped the scaffolding that supported the old
+model.
+
+### Changed
+- `sift auto LIST.txt` now takes a worklist file (one topic per line)
+  and works through it synchronously: one fresh, bounded pi session per
+  topic, so the local model never drags a prior topic's context forward
+  (the slowdown that made long runs unusable on a laptop). Findings
+  accumulate in a `findings.db` + `report.md` shared across the sweep.
+- Every few topics a consolidation pass writes `digest.md`, which is
+  prepended to later topics' prompts as cross-topic memory.
+- llama-server is recycled at the start of each topic and reaped when
+  the sweep ends.
+
+### Added
+- `sift queue "<lead>"` — the agent appends freshly surfaced leads to
+  the running worklist for a later session to pick up.
+
+### Removed
+- The SwiftUI menu-bar app and its App Intent.
+- The detached `_daemon` re-exec, `.sift-run.json` sidecars, the active
+  lead, and the `lead` / `status` / `logs` / `stop` commands. Runs are
+  foreground now; ^C stops a sweep.
+
 ## [0.1.0] — 2026-05-06
 
 Initial public release. Native macOS investigation tool for Aleph

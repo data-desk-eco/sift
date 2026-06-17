@@ -5,9 +5,8 @@ import Foundation
 /// generates kebab-case slugs or `yyyyMMdd-HHmmss` timestamps
 /// internally, so every legitimate name fits the validation pattern.
 /// Validation gates every consumer that turns a name into a filesystem
-/// path so a corrupted `~/.sift/active-lead`, a typo'd CLI argument,
-/// or a malicious tool poking at sift's state can't escape `~/.sift/run/`
-/// or the vault's `research/` directory via `..` or `/`.
+/// path so a typo'd CLI argument or a malicious tool poking at sift's
+/// state can't escape the vault's `research/` directory via `..` or `/`.
 public enum SessionName {
     /// Throw `SiftError` if `name` isn't a valid session name.
     public static func validate(_ name: String) throws {
