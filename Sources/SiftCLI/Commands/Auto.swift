@@ -190,12 +190,18 @@ struct AutoCommand: SiftSubcommand {
 
     static func planPrompt(_ brief: String) -> String {
         """
-        You're setting up an investigation. Below is the operator's brief. \
-        Break it into a worklist of concrete, searchable leads — each a \
-        distinct subject, provision, entity, or thread to run against the \
-        collection. Add each with `sift queue "<lead>"`, one call per lead. \
-        Make them specific enough to search but not so granular they \
-        fragment. Don't search or investigate yet — just build the worklist, \
+        You're setting up an investigation from the operator's brief (below). \
+        First, scout the collection: run a handful of `sift search` calls (and \
+        `sift sources` if you don't know what's loaded) to see what's actually \
+        there on these subjects — which names, entities, and threads return \
+        hits, and which return nothing. Then build a worklist of concrete, \
+        searchable leads grounded in what you found: favour angles that \
+        returned promising hits, split a subject that's clearly large into \
+        separate leads, and drop angles the collection has nothing on. Add \
+        each lead with `sift queue "<lead>"`, one call per lead — specific \
+        enough to search but not so granular they fragment. This is \
+        reconnaissance, not the investigation: a dozen-odd searches is plenty, \
+        and don't read deeply or record findings yet. Build the worklist, \
         then stop.
 
         BRIEF:
