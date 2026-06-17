@@ -22,17 +22,24 @@ Aleph creds are already in `$ALEPH_URL` / `$ALEPH_API_KEY` — never open `secre
 
 Every Aleph entity gets a short alias (`r1`, `r2`, …) on first sight, stored in `aleph.sqlite` and stable across every session on the vault — `r5` resolves to the same entity tomorrow. Use the alias as the positional argument: `sift read r5`, `sift expand r5`. Your own findings get `f1`, `f2`, ….
 
-## One sift call at a time
+## How to work
 
-Issue sift commands serially, never in parallel. Every call writes the shared `aleph.sqlite` (aliases, response cache, edges); two racing writes fail one with `UNIQUE constraint failed: aliases.n`. Wait for each call to return. If you hit that error anyway, don't loop-retry — use the raw 64-char id printed alongside the alias, or pick up another thread; it assigns cleanly on the next call.
+Issue **one sift call at a time** — never in parallel. Every call writes the shared `aleph.sqlite` (alias assignments, response cache), and two racing writes fail one with `UNIQUE constraint failed: aliases.n`. If you hit that, don't loop-retry — use the raw 64-char id printed beside the alias, or pick up another thread, and it assigns cleanly on the next call.
+
+Work the loop **search broad → read selectively → record → pivot**, keeping your context lean as you go:
+
+- **Search** wide with cheap, literal queries and skim the result table — each row carries an alias. You're deciding *which* documents to open, so keep `--limit` small (10–20); you don't need every hit here.
+- **Read** only the aliases that look load-bearing. Plain `sift read <alias>` truncates the body to ~1500 chars, usually enough to judge relevance — spend `-f` (full text) only on a document you've decided matters. Full bodies are by far the biggest drain on your context.
+- **Record** what a document establishes as a FollowTheMoney entity the moment you confirm it (see *Recording findings*), before your next search — never batched at the end.
+- **Pivot** with `expand` / `similar` / `hubs` / `browse` to follow the links, then search again.
+
+Flags belong to specific commands — there are no universal ones. `--limit` / `--offset` page the list-producing commands (`search`, `expand`, `hubs`, `tree`, `recall`, `entity list`); `--full` / `--raw` are `read` only. `sift <cmd> --help` is authoritative.
 
 ## Tools
 
-Flags are POSIX-style (`sift <cmd> --help` for the full list); short forms `-l`/`--limit`, `-f`/`--full`, `-r`/`--raw`, `-o`/`--offset`. The query or alias is positional.
-
 **Search & read**
-- `search "<text>" [--type emails|docs|people|orgs|any] [--collection <id>] [--emitter|--recipient|--mentions <alias>] [--date-from|--date-to YYYY-MM-DD]` — hits, each with an alias; page with `--offset`. Keep `--limit` modest (10–20) — big result tables cost context too.
-- `read <alias>` — content with the body truncated to ~1500 chars, usually enough to judge relevance. Add `-f` only once you've decided a document is worth its full text — full bodies are the biggest drain on your context, so don't reach for it by default. `-r` dumps raw FtM JSON. Also lists any findings that cite this entity.
+- `search "<text>" [--type emails|docs|people|orgs|any] [--collection <id>] [--emitter|--recipient|--mentions <alias>] [--date-from|--date-to YYYY-MM-DD] [--limit N] [--offset N]` — hits, each with an alias.
+- `read <alias> [-f|--full] [-r|--raw]` — entity content; body truncated unless `-f`. `-r` dumps raw FtM JSON. Also lists any findings that cite this entity.
 
 **Pivot**
 - `expand <alias> [--property <name>]` — entities linked via FtM refs. For a party, use `search --recipient <alias>` (expand only returns counts).
