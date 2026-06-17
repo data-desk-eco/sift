@@ -189,13 +189,18 @@ struct AutoCommand: SiftSubcommand {
                 \(topic)
 
             Search, read what matters, and pivot with `similar` / `expand` / \
-            `hubs` to follow the trail. Record everything solid as a \
-            FollowTheMoney entity with `sift entity create` — the parties, \
-            accounts and assets, and the relationships between them (Payment, \
-            Ownership, Directorship, UnknownLink, …). Cite the source on every \
-            entity with `--source <alias>`. If a document points to another \
-            lead worth its own pass, add it with `sift queue "<lead>"`. Stop \
-            when this lead is exhausted or the deadline nears.
+            `hubs` to follow the trail. Record findings AS YOU GO: the moment \
+            a document establishes a fact — a party, an account, an asset, a \
+            payment or an ownership/control link — create the FollowTheMoney \
+            entity with `sift entity create … --source <alias>` before your \
+            next search, and link related entities by alias (Payment, \
+            Ownership, Directorship, UnknownLink, …). Do not batch this to the \
+            end. Every document you open with `-f` must leave at least one \
+            entity behind — if it wouldn't, you didn't need the full read. A \
+            session that searches and reads but records no entities has \
+            produced nothing, however much you learned. If a document points \
+            to another lead worth its own pass, add it with `sift queue \
+            "<lead>"`. Stop when this lead is exhausted or the deadline nears.
             """
         return p
     }
