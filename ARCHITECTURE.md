@@ -31,12 +31,13 @@ removed; it earned nothing the terminal didn't already give.
   secrets.json                        ← Aleph + hosted-backend credentials
   research/
     aleph.sqlite                      ← shared cache (entities, aliases, edges)
-    <run>/                            ← one dir per `sift auto` sweep
-      report.md                       ← running narrative (shared)
-      findings.db                     ← FtM findings (shared across the sweep)
-      digest.md                       ← periodic consolidation
+    <run>/                            ← one dir per `sift auto` brief
+      topics.txt                      ← the worklist (run state)
+      findings.db                     ← FtM findings (shared across the run)
+      digest.md                       ← periodic consolidation, fed forward
+      report.md                       ← final write-up
       pi.stderr.log                   ← raw pi stderr (rotated)
-      .pi-sessions/<topic>/           ← pi's per-topic conversation history
+      .pi-sessions/<phase>/           ← pi's per-phase conversation history
 ```
 
 Two clear separations:
@@ -48,26 +49,32 @@ Two clear separations:
   `sift init`, never persisted by sift, and prompted once per boot via
   `requireVault()` — losing it is unrecoverable.
 
-## The topic sweep
+## The sweep: plan → sweep → report
 
-`sift auto LIST.txt` is the headline command. It's a synchronous loop
-— no daemon, no detachment, no sidecar (all removed). The local model
+`sift auto BRIEF` is the headline command. It's a synchronous loop —
+no daemon, no detachment, no sidecar (all removed). The local model
 slows badly once a context passes a few tens of thousands of tokens, so
 the design goal is simple: never let one agent's context grow without
-bound. The sweep does that by giving every topic a fresh, short-lived
-agent and keeping the accumulated state on disk instead of in the
-context window.
+bound. The run does that by giving every unit of work a fresh,
+short-lived agent and keeping the accumulated state on disk instead of
+in the context window.
 
-The flow (`Sources/SiftCLI/Commands/Auto.swift`):
+The flow (`Sources/SiftCLI/Commands/Auto.swift` — every phase is one
+`PiRunner.prepare` + `PiRunner.drivePi`, a fresh pi context with a
+distinct `legSubdir`):
 
 ```
-user types `sift auto sanctions.txt`
+user types `sift auto sanctions.md`
        │
        ▼
-  ensure vault unlocked; run dir = <vault>/research/<list-basename>/
+  ensure vault unlocked; run dir = <vault>/research/<brief-basename>/
        │
        ▼
-  while Worklist.next(at: list):                      ← first un-marked line
+  plan (if topics.txt absent)   one agent reads the brief and queues a
+                                worklist via `sift queue` → topics.txt
+       │
+       ▼
+  while Worklist.next(at: topics.txt):                ← first un-marked line
     PiRunner.prepare    starts llama-server (recycling any stale one),
                         writes pi config + system prompt; legSubdir =
                         t<n>-<slug> → a fresh pi context per topic
@@ -77,17 +84,25 @@ user types `sift auto sanctions.txt`
                         topics the agent queued mid-run survive)
     every 3 topics:     a consolidation pass writes digest.md, which is
                         prepended to later topics' prompts
-  LlamaServer.stopLocalIfIdle    reap the model when the sweep ends
+       │
+       ▼
+  report                a final agent writes report.md from the findings
+       │
+       ▼
+  LlamaServer.stopLocalIfIdle    reap the model when the run ends
 ```
 
-The worklist file is the entire run state. A line is pending unless
-it's blank, a `#` comment, or already `✓`-marked. The agent grows the
+`topics.txt` is the entire mutable run state. A line is pending unless
+it's blank, a `#` comment, or already `✓`-marked. Any agent grows the
 sweep by calling `sift queue "<lead>"`, which appends to the file named
-in `$SIFT_TOPIC_LIST` (`Sources/SiftCore/Worklist.swift`). `report.md`
-and `findings.db` live in the run dir and are shared across every topic,
-so findings accumulate and dedupe against the shared `aleph.sqlite`
-alias table. There are no concurrent writers — one pi runs at a time,
-and the orchestrator only touches the worklist between sessions.
+in `$SIFT_TOPIC_LIST` (`Sources/SiftCore/Worklist.swift`). `findings.db`,
+`digest.md`, and `report.md` live in the run dir and are shared across
+the run, so findings accumulate and dedupe against the shared
+`aleph.sqlite` alias table. There are no concurrent writers — one pi
+runs at a time, and the orchestrator only touches the worklist between
+sessions. Per-topic agents only search and emit entities; the
+report-writing style rules live in `Auto.reportPrompt`, off the
+always-loaded system prompt.
 
 ## Alias stability
 

@@ -11,19 +11,24 @@ Reworked `sift auto` from a single long-running agent into a
 model.
 
 ### Changed
-- `sift auto LIST.txt` now takes a worklist file (one topic per line)
-  and works through it synchronously: one fresh, bounded pi session per
-  topic, so the local model never drags a prior topic's context forward
-  (the slowdown that made long runs unusable on a laptop). Findings
-  accumulate in a `findings.db` + `report.md` shared across the sweep.
-- Every few topics a consolidation pass writes `digest.md`, which is
-  prepended to later topics' prompts as cross-topic memory.
-- llama-server is recycled at the start of each topic and reaped when
-  the sweep ends.
+- `sift auto BRIEF` now runs three phases — **plan** (an agent turns a
+  freeform brief into a `topics.txt` worklist), **sweep** (one fresh,
+  bounded pi session per topic, so the local model never drags a prior
+  topic's context forward — the slowdown that made long runs unusable on
+  a laptop), and **report** (a final agent writes `report.md` from the
+  findings). Re-running resumes from `topics.txt`.
+- Every few topics a consolidation pass writes `digest.md`, fed forward
+  into later prompts as cross-topic memory.
+- Per-topic agents now just search and emit FollowTheMoney entities; the
+  prompt and the bundled `SKILL.md` / `AGENTS.md` were slimmed to that
+  core loop, and the report-writing style rules moved into the final
+  phase's prompt instead of the always-loaded system prompt.
+- llama-server is recycled at the start of each session and reaped when
+  the run ends.
 
 ### Added
-- `sift queue "<lead>"` — the agent appends freshly surfaced leads to
-  the running worklist for a later session to pick up.
+- `sift queue "<lead>"` — any agent appends freshly surfaced leads to
+  the worklist for a later session to pick up; the planner uses it too.
 
 ### Removed
 - The SwiftUI menu-bar app and its App Intent.

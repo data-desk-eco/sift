@@ -64,7 +64,7 @@ public enum SystemPrompt {
                 + "or pursue leads you noted but didn't follow. After every few "
                 + "tool calls, run `sift time` to see remaining time and pacing "
                 + "guidance. The deadline itself is soft — there's no hard kill — "
-                + "but report.md must exist by the time you stop."
+                + "but record what you found as entities before you stop."
             )
         }
 

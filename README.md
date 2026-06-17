@@ -48,22 +48,27 @@ The Aleph and memory subcommands are the working surface. Each one takes a query
 
 `sift <command> --help` lists flags for any subcommand.
 
-## Sweeping a list of topics
+## Sweeping a brief
 
-The same tools can be driven by an LLM. `sift auto LIST.txt` takes a worklist — one topic per line — and works through it sequentially: for each topic it boots a fresh, short-lived agent that searches, reads, and pivots through the collection, then records what it finds as [FollowTheMoney](https://followthemoney.tech) entities.
+The same tools can be driven by an LLM. `sift auto BRIEF` takes a brief — a list of topics, or freeform markdown instructions — and runs three phases:
+
+1. **Plan** — an agent reads the brief and breaks it into a worklist of concrete leads (`topics.txt`).
+2. **Sweep** — for each lead, a fresh, short-lived agent searches, reads, and pivots through the collection and records what it finds as [FollowTheMoney](https://followthemoney.tech) entities. Every few leads a consolidation pass distils progress into a digest that's fed forward; an agent that surfaces a new lead appends it with `sift queue`, so the sweep grows as it goes.
+3. **Report** — a final agent writes `report.md` from the findings.
 
 ```bash
-cat > sanctions.txt <<'EOF'
-EU 833/2014 Art. 3 — dual-use goods/technology to Russia
-EU 833/2014 Art. 5 — sovereign-debt and securities restrictions
-designated banks: Bank Rossiya, SMP Bank
+cat > sanctions.md <<'EOF'
+Search the leak for anything matching EU sanctions on Russia in force
+before 2022 — dual-use exports under 833/2014, sovereign-debt and
+securities restrictions, and dealings with designated banks
+(Bank Rossiya, SMP Bank).
 EOF
 
-sift auto sanctions.txt          # sweep every line, one agent each
-sift auto -t 30m sanctions.txt   # 30 minutes per topic
+sift auto sanctions.md           # plan → sweep → report
+sift auto -t 30m sanctions.md    # 30 minutes per lead
 ```
 
-Each topic gets its own bounded context, so the local model never bogs down dragging one investigation's history into the next — the reason the sweep beats a single long-running agent on a laptop. Findings accumulate in a shared `findings.db` and a running `report.md`; every few topics a consolidation pass distils progress into a digest that's fed forward. An agent that surfaces a fresh lead appends it to the worklist with `sift queue`, so the sweep grows as it goes. The worklist file is the only state — open it mid-run and you see what's done (`✓`), what's pending, and what's been discovered.
+Each lead gets its own bounded context, so the local model never bogs down dragging one investigation's history into the next — the reason the sweep beats a single long-running agent on a laptop. `topics.txt` is the run's state: open it mid-run and you see what's done (`✓`), what's pending, and what's been discovered. Re-running resumes where it left off.
 
 `findings.db` is FollowTheMoney all the way down, so you can upload it straight back into Aleph to thread your findings into the existing entity graph.
 
