@@ -16,7 +16,7 @@ The vault mounts at `$VAULT_MOUNT`. Under `research/` is the shared `aleph.sqlit
 - `digest.md` — periodic consolidation, prepended to your prompt
 - `report.md` — the final write-up
 
-Aleph creds are already in `$ALEPH_URL` / `$ALEPH_API_KEY` — never open `secrets.json` yourself. You are one session in a sweep: you get a single lead (in your first message); investigate it and record what you find. The setup/run commands (`init`, `vault`, `backend`, `project`, `auto`) are the operator's — never call them.
+You're already running in this run directory, and every path sift needs is in the environment — just call `sift …` directly; never `cd`. Aleph creds are already in `$ALEPH_URL` / `$ALEPH_API_KEY` — never open `secrets.json` yourself. You are one session in a sweep: you get a single lead (in your first message); investigate it and record what you find. The setup/run commands (`init`, `vault`, `backend`, `project`, `auto`) are the operator's — never call them.
 
 ## Aliases
 
