@@ -97,6 +97,11 @@ struct AutoCommand: SiftSubcommand {
         if !FileManager.default.fileExists(atPath: topicsURL.path) {
             try await plan(brief: briefURL, runDir: runDir, topicsURL: topicsURL,
                            deadline: Deadline(seconds: min(perTopic, Self.planSeconds)))
+            // The planner queues leads via `sift queue`, but its generic
+            // file tool can clobber the visible worklist (it once cut 16
+            // queued leads to 3). Rebuild topics.txt from the hidden
+            // ledger so every queued lead reaches the sweep.
+            Worklist.rebuildFromLedger(at: topicsURL)
         }
         guard Worklist.next(at: topicsURL) != nil else {
             LlamaServer.stopLocalIfIdle()
@@ -118,30 +123,63 @@ struct AutoCommand: SiftSubcommand {
                 runDir: runDir, topicsURL: topicsURL, slug: slug,
                 deadline: Deadline(seconds: perTopic), segment: segment
             )
-            let code = try PiRunner.drivePi(
+            let r = try PiRunner.drivePi(
                 prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir, segment: segment),
                 debug: debug, maxSteps: Self.topicMaxSteps
             )
-            if code != 0 { Log.say("auto", "pi exited \(code) on this topic — continuing") }
+            if r.code != 0 { Log.say("auto", "pi exited \(r.code) on this topic — continuing") }
+            if !Self.captureIfMissing(segment, finalText: r.finalText) {
+                Log.say("auto", "topic \(started) wrote no segment — nothing to report from it")
+            }
             Worklist.markDone(at: topicsURL, topic: topic)
             done += 1
 
             if done % Self.consolidateEvery == 0, Worklist.next(at: topicsURL) != nil {
                 try await runMeta(runDir: runDir, topicsURL: topicsURL,
                                   slug: "digest-\(done)", prompt: Self.consolidatePrompt,
-                                  note: "consolidating after \(done) topics → digest.md")
+                                  note: "consolidating after \(done) topics → digest.md",
+                                  target: runDir.appending(path: "digest.md"))
             }
         }
 
         // Phase 2 — final write-up.
+        let report = runDir.appending(path: "report.md")
         if done > 0 {
             try await runMeta(runDir: runDir, topicsURL: topicsURL,
                               slug: "report", prompt: Self.reportPrompt,
-                              note: "writing report.md")
+                              note: "writing report.md", target: report)
         }
 
         LlamaServer.stopLocalIfIdle()
-        Log.say("auto", "swept \(done) topic(s) — report.md in \(runDir.path)")
+        if Self.hasContent(report) {
+            Log.say("auto", "swept \(done) topic(s) — report.md in \(runDir.path)")
+        } else {
+            let n = ((try? FileManager.default.contentsOfDirectory(atPath: segmentsDir.path)) ?? [])
+                .filter { $0.hasSuffix(".md") }.count
+            Log.say("auto", "swept \(done) topic(s) — no report.md written; \(n) segment(s) in \(segmentsDir.path)")
+        }
+    }
+
+    // MARK: - Deliverable capture
+
+    /// True if `url` exists and holds non-whitespace content.
+    static func hasContent(_ url: URL) -> Bool {
+        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        return !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Guarantee the deliverable exists. The weak local model sometimes
+    /// investigates thoroughly but ends the turn without ever writing its
+    /// file — when that happens we salvage its closing prose as the file
+    /// so a phase that did the work still leaves something behind. Returns
+    /// whether the file ended up non-empty.
+    @discardableResult
+    static func captureIfMissing(_ url: URL, finalText: String) -> Bool {
+        if hasContent(url) { return true }
+        let t = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return false }
+        try? t.write(to: url, atomically: true, encoding: .utf8)
+        return true
     }
 
     // MARK: - Phases
@@ -159,17 +197,21 @@ struct AutoCommand: SiftSubcommand {
         )
     }
 
-    /// Run one non-topic agent (plan / consolidate / report) to completion.
+    /// Run one non-topic agent (consolidate / report) to completion. When
+    /// `target` is given, fall back to the agent's closing prose if it
+    /// never wrote the file itself.
     private func runMeta(
-        runDir: URL, topicsURL: URL, slug: String, prompt: String, note: String
+        runDir: URL, topicsURL: URL, slug: String, prompt: String, note: String,
+        target: URL? = nil
     ) async throws {
         Log.say("auto", note)
         let pre = try await prepareMeta(
             runDir: runDir, topicsURL: topicsURL, slug: slug, deadline: nil
         )
-        _ = try PiRunner.drivePi(
+        let r = try PiRunner.drivePi(
             prelaunch: pre, prompt: prompt, debug: debug, maxSteps: Self.metaMaxSteps
         )
+        if let target { Self.captureIfMissing(target, finalText: r.finalText) }
     }
 
     /// Shared prelaunch wiring: fresh pi context (`legSubdir`), and the

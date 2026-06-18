@@ -38,11 +38,41 @@ public enum Worklist {
         try? lines.joined(separator: "\n").write(to: path, atomically: true, encoding: .utf8)
     }
 
+    /// Hidden, append-only sibling of the visible worklist that records
+    /// every queued lead. The agent is never told about it, so a stray
+    /// generic-file write that clobbers topics.txt — which is exactly how
+    /// a planning run once lost 13 of 16 queued leads — can't touch the
+    /// canonical list. `rebuildFromLedger` restores topics.txt from it.
+    static func ledger(for path: URL) -> URL {
+        path.deletingLastPathComponent().appending(path: ".leads")
+    }
+
+    /// Overwrite `path` with every distinct lead from the ledger, all
+    /// pending. Run once after a *fresh* plan to undo any direct write
+    /// the planner made to the visible worklist; never on resume, where
+    /// topics.txt holds real sweep progress the ledger doesn't track.
+    public static func rebuildFromLedger(at path: URL) {
+        guard let text = try? String(contentsOf: ledger(for: path), encoding: .utf8) else { return }
+        var seen = Set<String>(), leads: [String] = []
+        for line in text.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || seen.contains(t) { continue }
+            seen.insert(t); leads.append(t)
+        }
+        guard !leads.isEmpty else { return }
+        try? (leads.joined(separator: "\n") + "\n").write(to: path, atomically: true, encoding: .utf8)
+    }
+
     /// Append a topic for a later session to pick up. No-op on blanks
-    /// and exact duplicates of a line already in the file.
+    /// and exact duplicates. Records to the hidden ledger first (raw —
+    /// rebuild dedups on read) so the lead survives even if a stray write
+    /// later clobbers the visible file.
     public static func append(at path: URL, topic: String) throws {
         let t = topic.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        let led = ledger(for: path)
+        let prior = (try? String(contentsOf: led, encoding: .utf8)) ?? ""
+        try? (prior + t + "\n").write(to: led, atomically: true, encoding: .utf8)
         let existing = (try? String(contentsOf: path, encoding: .utf8)) ?? ""
         let seen = existing.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }

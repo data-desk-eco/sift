@@ -134,7 +134,7 @@ public enum PiRunner {
     /// the prompt and deadline should normally stop the agent first.
     public static func drivePi(
         prelaunch: Prelaunch, prompt: String, debug: Bool, maxSteps: Int? = nil
-    ) throws -> Int32 {
+    ) throws -> (code: Int32, finalText: String) {
         // `--no-session`: every sweep phase is a fresh, never-resumed
         // context, so persisting pi's conversation (and the compaction it
         // runs on save) is wasted work — minutes per topic on this
@@ -206,7 +206,10 @@ public enum PiRunner {
         pi.waitUntilExit()
         try? stderrHandle.close()
         // A capped session is a clean stop on our terms, not a failure.
-        return capped ? 0 : pi.terminationStatus
+        // finalText is the agent's closing message — the orchestrator
+        // falls back to it when the agent investigated but never wrote
+        // its deliverable file itself.
+        return (capped ? 0 : pi.terminationStatus, stream.finalText)
     }
 
     // MARK: - Helpers

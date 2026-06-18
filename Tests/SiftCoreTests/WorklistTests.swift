@@ -37,6 +37,23 @@ import Testing
         #expect(lines == ["alpha", "beta"])
     }
 
+    @Test func rebuildFromLedgerRecoversClobberedLeads() throws {
+        // Mimic a run dir: queue several leads, then have a "stray write"
+        // clobber the visible worklist down to one line.
+        let dir = FileManager.default.temporaryDirectory
+            .appending(path: "wl-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appending(path: "topics.txt")
+        for lead in ["one", "two", "three"] { try Worklist.append(at: url, topic: lead) }
+        try "three\n".write(to: url, atomically: true, encoding: .utf8)  // clobber
+
+        Worklist.rebuildFromLedger(at: url)
+        let leads = try String(contentsOf: url, encoding: .utf8)
+            .components(separatedBy: "\n").filter { Worklist.isPending($0) }
+        #expect(leads == ["one", "two", "three"])
+    }
+
     @Test func nextIsNilWhenEverythingDone() throws {
         let url = try tempList("✓ one\n# note\n\n")
         defer { try? FileManager.default.removeItem(at: url) }
