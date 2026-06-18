@@ -58,11 +58,13 @@ struct ReadCommand: SiftSubcommand {
     @Argument var alias: String
     @Flag(name: [.short, .customLong("full")]) var full: Bool = false
     @Flag(name: [.short, .customLong("raw")]) var raw: Bool = false
+    @Option(name: .customLong("limit"), help: "cap the body to N characters")
+    var limit: Int?
 
     func execute() async throws {
         let store = try openSessionStore()
         let client = try Sift.makeAlephClient()
-        let input = ReadInput(alias: alias, full: full, raw: raw)
+        let input = ReadInput(alias: alias, full: full, raw: raw, limit: limit)
         emit(try await runRead(client: client, store: store, input: input))
     }
 }

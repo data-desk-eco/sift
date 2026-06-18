@@ -4,8 +4,9 @@ public struct ReadInput: Sendable {
     public var alias: String
     public var full: Bool
     public var raw: Bool
-    public init(alias: String, full: Bool = false, raw: Bool = false) {
-        self.alias = alias; self.full = full; self.raw = raw
+    public var limit: Int?
+    public init(alias: String, full: Bool = false, raw: Bool = false, limit: Int? = nil) {
+        self.alias = alias; self.full = full; self.raw = raw; self.limit = limit
     }
 }
 
@@ -45,7 +46,10 @@ public func runRead(
     let caption = (data["caption"] as? String) ?? ""
     var bodyText = Render.firstLabel(props["bodyText"])
     if bodyText.isEmpty { bodyText = Render.firstLabel(props["description"]) }
-    if !input.full { bodyText = Render.truncate(bodyText) }
+    // --limit caps the body to N chars (a middle ground between the
+    // default truncation and -f full); otherwise truncate unless -f.
+    if let limit = input.limit { bodyText = Render.truncate(bodyText, maxChars: max(1, limit)) }
+    else if !input.full { bodyText = Render.truncate(bodyText) }
 
     var lines: [String] = []
     lines.append("id:       \(eid)")

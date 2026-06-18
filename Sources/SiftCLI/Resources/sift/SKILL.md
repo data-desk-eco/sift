@@ -39,7 +39,7 @@ Flags belong to specific commands — there are no universal ones. `--limit` / `
 
 **Search & read**
 - `search "<text>" [--type emails|docs|people|orgs|any] [--collection <id>] [--emitter|--recipient|--mentions <alias>] [--date-from|--date-to YYYY-MM-DD] [--limit N] [--offset N]` — hits, each with an alias.
-- `read <alias> [-f|--full] [-r|--raw]` — entity content; body truncated unless `-f`. `-r` dumps raw FtM JSON. The header prints the entity's Aleph url, for linking in your write-up.
+- `read <alias> [-f|--full] [-r|--raw] [--limit N]` — entity content for one alias (not a search — no result count). Body is truncated unless `-f`; `--limit N` caps it to N characters instead. `-r` dumps raw FtM JSON. The header prints the entity's Aleph url, for linking in your write-up.
 
 **Pivot**
 - `expand <alias> [--property <name>]` — entities linked via FtM refs. For a party, use `search --recipient <alias>` (expand only returns counts).
