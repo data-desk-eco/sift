@@ -279,6 +279,14 @@ struct RefResolver {
 
 // MARK: - Rendering
 
+/// `<ALEPH_URL>/entities/<id>` for an aleph-sourced finding, or nil when
+/// the source isn't an aleph entity or no server url is in the env.
+private func alephLink(_ id: String, alias: String) -> String? {
+    guard alias.hasPrefix("r") else { return nil }
+    let base = ProcessInfo.processInfo.environment["ALEPH_URL"]
+    return Report.AliasLink(alias: alias, entityId: id, schema: nil, name: nil).url(server: base)
+}
+
 private func render(
     _ row: FindingsStore.Finding, header: String,
     resolver: RefResolver, warnings: [String]
@@ -294,7 +302,10 @@ private func render(
     if !row.sources.isEmpty {
         let refs = row.sources.map { id -> String in
             let d = resolver.display(id)
-            return "\(d.alias) \(Render.short(d.label, width: 28))"
+            let label = "\(d.alias) \(Render.short(d.label, width: 28))"
+            // aleph sources (r-aliases) get a clickable entity url so the
+            // report can cite a durable link, not just a session-local alias.
+            return alephLink(id, alias: d.alias).map { "\(label)  \($0)" } ?? label
         }
         head.append(pad("sources:", 10) + refs.joined(separator: ", "))
     }

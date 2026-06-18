@@ -243,17 +243,25 @@ struct AutoCommand: SiftSubcommand {
     static let reportPrompt = """
         The sweep is complete. Write report.md — the investigation's write-up \
         — from the findings recorded this run. Read them with `sift entity \
-        list` and `sift entity show <alias>`, and read digest.md for the \
-        throughline.
+        list` and `sift entity show <alias>`: each entity prints its `id:`, \
+        and every source line prints its Aleph entity url. Read digest.md for \
+        the throughline.
 
         Write in neutral, wire-service prose: state what the documents show, \
         don't editorialise, don't call anything "major" / "explosive" / \
         "breakthrough", no exclamation marks. Structure it with descriptive \
-        section headers, full paragraphs that cite the source alias for each \
-        load-bearing claim, and markdown tables for structured data (parties, \
-        dates, amounts). Close with the open questions and suggested next \
-        steps a reporter would need to take it further. Write the file, then \
-        stop.
+        section headers and full paragraphs; cite the source alias (e.g. `r4`) \
+        inline for each load-bearing claim, and use markdown tables for \
+        structured data (parties, dates, amounts).
+
+        The report must stand on its own, so make every reference traceable. \
+        End with two tables. **Entities** — every recorded finding, one row \
+        per alias with its schema, caption, and `id`. **Sources** — every \
+        source alias you cited, with its Aleph entity id and a markdown link \
+        to its page, copying the url printed on the source line: \
+        `[open](<that url>)`. Then close with the open questions and suggested \
+        next steps a reporter would need to take it further. Write the file, \
+        then stop.
         """
 }
 
