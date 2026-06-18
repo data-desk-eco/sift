@@ -6,7 +6,7 @@ import Foundation
 /// system prompt + backend, `drivePi()` spawns pi headlessly and
 /// streams its rendered event log to stderr so the operator watches
 /// progress live. No daemon, no run-state sidecar — the worklist file
-/// and the findings DB are the only state.
+/// and the per-lead segment notes are the only state.
 public enum PiRunner {
 
     public struct Prelaunch: Sendable {
@@ -26,7 +26,7 @@ public enum PiRunner {
     /// `legSubdir` gives each topic its own pi conversation: pi's session
     /// dir becomes `<sessionDir>/.pi-sessions/<legSubdir>` so every topic
     /// starts with a fresh context (no `--continue`), while report.md /
-    /// findings.db / aleph.sqlite all stay shared across the run.
+    /// segments/ / aleph.sqlite all stay shared across the run.
     public static func prepare(
         sessionDir: URL, resuming: Bool,
         deadline: Deadline?, skillDir: URL,
@@ -82,7 +82,6 @@ public enum PiRunner {
         // refs stable across topics (`r5` resolves to the same entity in
         // every session on the vault) and avoids re-paying the API cost
         // for entities a previous topic already cached.
-        env["SIFT_FINDINGS_DB"] = sessionDir.appending(path: "findings.db").path
         let secrets = (try? SecretsStore.load(vault: vault)) ?? VaultSecrets()
         if let url = secrets.alephURL, !url.isEmpty { env["ALEPH_URL"] = url }
         if let key = secrets.alephAPIKey, !key.isEmpty { env["ALEPH_API_KEY"] = key }
@@ -121,15 +120,15 @@ public enum PiRunner {
     /// Run a single pi process to completion for one topic. pi runs
     /// headlessly (`-p --mode json`); we parse its JSON event stream and
     /// echo rendered lines to stderr so the operator sees searches and
-    /// findings land in real time. Returns pi's termination status.
+    /// write-ups land in real time. Returns pi's termination status.
     ///
     /// `maxSteps` is a hard backstop: when the agent has made that many
     /// tool calls we end the session (SIGTERM). pi has no step/token cap
     /// of its own and the soft deadline has no teeth in `--print` mode,
     /// so on this hardware a session that won't stop itself just gets
-    /// slower as its context grows. Findings commit to findings.db the
-    /// moment they're recorded, so ending a session mid-step loses only
-    /// the in-flight call, not recorded work. The cap is a backstop —
+    /// slower as its context grows. The agent writes its segment as it
+    /// goes, so ending a session mid-step loses only the in-flight call,
+    /// not work already written down. The cap is a backstop —
     /// the prompt and deadline should normally stop the agent first.
     public static func drivePi(
         prelaunch: Prelaunch, prompt: String, debug: Bool, maxSteps: Int? = nil

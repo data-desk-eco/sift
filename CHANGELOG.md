@@ -15,14 +15,17 @@ model.
   freeform brief into a `topics.txt` worklist), **sweep** (one fresh,
   bounded pi session per topic, so the local model never drags a prior
   topic's context forward — the slowdown that made long runs unusable on
-  a laptop), and **report** (a final agent writes `report.md` from the
-  findings). Re-running resumes from `topics.txt`.
+  a laptop), and **report** (a final agent stitches the per-topic
+  segments into `report.md`, reviewing for overlap and contradictions).
+  Re-running resumes from `topics.txt`.
 - Every few topics a consolidation pass writes `digest.md`, fed forward
   into later prompts as cross-topic memory.
-- Per-topic agents now just search and emit FollowTheMoney entities; the
-  prompt and the bundled `SKILL.md` / `AGENTS.md` were slimmed to that
-  core loop, and the report-writing style rules moved into the final
-  phase's prompt instead of the always-loaded system prompt.
+- Per-topic agents now write their findings up as a markdown segment
+  under `segments/` (one file per lead), citing the source alias for
+  every claim, instead of recording structured FollowTheMoney entities.
+  The prompt and the bundled `SKILL.md` / `AGENTS.md` were slimmed to
+  that core loop, and the report-writing style rules moved into the
+  final phase's prompt instead of the always-loaded system prompt.
 - llama-server is recycled at the start of each session and reaped when
   the run ends.
 
@@ -31,6 +34,9 @@ model.
   the worklist for a later session to pick up; the planner uses it too.
 
 ### Removed
+- The FollowTheMoney findings store and the `sift entity` command
+  family (`findings.db`, `FindingsStore`, `Ftm`). The report is the sole
+  deliverable now; nothing consumed the structured store downstream.
 - The SwiftUI menu-bar app and its App Intent.
 - The detached `_daemon` re-exec, `.sift-run.json` sidecars, the active
   lead, and the `lead` / `status` / `logs` / `stop` commands. Runs are

@@ -53,8 +53,8 @@ The Aleph and memory subcommands are the working surface. Each one takes a query
 The same tools can be driven by an LLM. `sift auto BRIEF` takes a brief — a list of topics, or freeform markdown instructions — and runs three phases:
 
 1. **Plan** — an agent reads the brief and breaks it into a worklist of concrete leads (`topics.txt`).
-2. **Sweep** — for each lead, a fresh, short-lived agent searches, reads, and pivots through the collection and records what it finds as [FollowTheMoney](https://followthemoney.tech) entities. Every few leads a consolidation pass distils progress into a digest that's fed forward; an agent that surfaces a new lead appends it with `sift queue`, so the sweep grows as it goes.
-3. **Report** — a final agent writes `report.md` from the findings.
+2. **Sweep** — for each lead, a fresh, short-lived agent searches, reads, and pivots through the collection and writes up what it finds as a markdown segment, citing the source document for every claim. Every few leads a consolidation pass distils progress into a digest that's fed forward; an agent that surfaces a new lead appends it with `sift queue`, so the sweep grows as it goes.
+3. **Report** — a final agent stitches the segments into `report.md`, reviewing for overlap and contradictions as it goes.
 
 ```bash
 cat > sanctions.md <<'EOF'
@@ -70,7 +70,7 @@ sift auto -t 30m sanctions.md    # 30 minutes per lead
 
 Each lead gets its own bounded context, so the local model never bogs down dragging one investigation's history into the next — the reason the sweep beats a single long-running agent on a laptop. `topics.txt` is the run's state: open it mid-run and you see what's done (`✓`), what's pending, and what's been discovered. Re-running resumes where it left off.
 
-`findings.db` is FollowTheMoney all the way down, so you can upload it straight back into Aleph to thread your findings into the existing entity graph.
+Every claim in the report carries the alias of the document it came from, and `report.md` ends with a sources table linking each one straight back to its Aleph page — so the write-up stands on its own and every line is traceable.
 
 The agent runs against either a local LLM (Qwen3 via [llama.cpp](https://github.com/ggml-org/llama.cpp), so only Aleph traffic leaves the machine) or any OpenAI-compatible hosted endpoint. Toggle with `sift backend local|hosted`. It's built on the [`pi`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) harness; the bundled skill file documents the tool surface and a few Aleph quirks for the model.
 

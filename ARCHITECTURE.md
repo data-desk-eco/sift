@@ -33,9 +33,9 @@ removed; it earned nothing the terminal didn't already give.
     aleph.sqlite                      ← shared cache (entities, aliases, edges)
     <run>/                            ← one dir per `sift auto` brief
       topics.txt                      ← the worklist (run state)
-      findings.db                     ← FtM findings (shared across the run)
+      segments/<slug>.md              ← one lead's write-up (per topic)
       digest.md                       ← periodic consolidation, fed forward
-      report.md                       ← final write-up
+      report.md                       ← final write-up, stitched from segments
       pi.stderr.log                   ← raw pi stderr (rotated)
       .pi-sessions/<phase>/           ← pi's per-phase conversation history
 ```
@@ -86,7 +86,7 @@ user types `sift auto sanctions.md`
                         prepended to later topics' prompts
        │
        ▼
-  report                a final agent writes report.md from the findings
+  report                a final agent stitches the segments into report.md
        │
        ▼
   LlamaServer.stopLocalIfIdle    reap the model when the run ends
@@ -95,13 +95,13 @@ user types `sift auto sanctions.md`
 `topics.txt` is the entire mutable run state. A line is pending unless
 it's blank, a `#` comment, or already `✓`-marked. Any agent grows the
 sweep by calling `sift queue "<lead>"`, which appends to the file named
-in `$SIFT_TOPIC_LIST` (`Sources/SiftCore/Worklist.swift`). `findings.db`,
+in `$SIFT_TOPIC_LIST` (`Sources/SiftCore/Worklist.swift`). `segments/`,
 `digest.md`, and `report.md` live in the run dir and are shared across
-the run, so findings accumulate and dedupe against the shared
-`aleph.sqlite` alias table. There are no concurrent writers — one pi
-runs at a time, and the orchestrator only touches the worklist between
-sessions. Per-topic agents only search and emit entities; the
-report-writing style rules live in `Auto.reportPrompt`, off the
+the run; each topic writes its own segment, so there are no concurrent
+writers — one pi runs at a time, and the orchestrator only touches the
+worklist between sessions. Per-topic agents only search and write prose,
+citing source aliases inline; the report-writing style rules live in
+`Auto.reportPrompt`, off the
 always-loaded system prompt.
 
 ## Alias stability

@@ -63,8 +63,7 @@ struct ReadCommand: SiftSubcommand {
         let store = try openSessionStore()
         let client = try Sift.makeAlephClient()
         let input = ReadInput(alias: alias, full: full, raw: raw)
-        let findings = try? Session.openFindings()
-        emit(try await runRead(client: client, store: store, input: input, findings: findings))
+        emit(try await runRead(client: client, store: store, input: input))
     }
 }
 

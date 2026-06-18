@@ -9,14 +9,15 @@ import SiftCore
 ///   0. **plan** — one agent reads the brief and queues a worklist of
 ///      concrete leads into `topics.txt` (skipped on resume).
 ///   1. **sweep** — for each topic, a fresh bounded pi session searches,
-///      reads, pivots, and records FollowTheMoney findings. Every few
-///      topics a consolidation pass distils progress into digest.md,
-///      which is fed forward to later sessions.
-///   2. **report** — a final agent writes report.md from the findings.
+///      reads, pivots, and writes up what it finds as a markdown segment
+///      under `segments/`. Every few topics a consolidation pass distils
+///      progress into digest.md, which is fed forward to later sessions.
+///   2. **report** — a final agent stitches the segments into report.md,
+///      reviewing for overlap and contradictions as it goes.
 ///
 /// Each topic gets its own short-lived context so qwen never drags a
 /// previous topic's history forward (the slowdown that made the old
-/// long-running agent useless on this hardware). findings.db, digest.md,
+/// long-running agent useless on this hardware). segments/, digest.md,
 /// and report.md are shared across the run.
 struct AutoCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
@@ -27,15 +28,15 @@ struct AutoCommand: SiftSubcommand {
             freeform instructions. A planning agent breaks it into a
             worklist (`topics.txt` in the run directory); then, for each
             topic, sift boots a fresh pi session bounded by --time-limit
-            that searches the collection and records FollowTheMoney
-            findings. Agents append new leads with `sift queue`, so the
-            sweep grows as it discovers them. When the worklist is dry a
-            final agent writes report.md.
+            that searches the collection and writes up what it finds as a
+            markdown segment under `segments/`. Agents append new leads
+            with `sift queue`, so the sweep grows as it discovers them.
+            When the worklist is dry a final agent stitches the segments
+            into report.md.
 
             Runs in the foreground: progress streams to the terminal and
-            ^C stops the sweep. Findings land in findings.db inside the
-            run directory under the vault; upload it to Aleph to thread
-            them into the existing entity graph. Re-running resumes —
+            ^C stops the sweep. The write-up lands in report.md inside the
+            run directory under the vault. Re-running resumes —
             already-swept topics stay marked done.
             """
     )
@@ -78,11 +79,13 @@ struct AutoCommand: SiftSubcommand {
         try Paths.ensure(researchDir)
 
         // The run dir is keyed off the brief filename so re-running the
-        // same brief resumes into the same findings.db / topics.txt.
+        // same brief resumes into the same segments/ / topics.txt.
         let base = SessionName.suggest(from: briefURL.deletingPathExtension().lastPathComponent)
         let runDir = researchDir.appending(path: base.isEmpty ? "sweep" : base)
         try Paths.ensure(runDir)
         let topicsURL = runDir.appending(path: "topics.txt")
+        let segmentsDir = runDir.appending(path: "segments")
+        try Paths.ensure(segmentsDir)
 
         // Phase 0 — plan, unless a worklist already exists (resume).
         if !FileManager.default.fileExists(atPath: topicsURL.path) {
@@ -102,13 +105,14 @@ struct AutoCommand: SiftSubcommand {
         while let topic = Worklist.next(at: topicsURL) {
             started += 1
             Log.say("auto", "topic \(started): \(topic)")
+            let slug = "t\(started)-\(SessionName.suggest(from: topic))"
+            let segment = segmentsDir.appending(path: "\(slug).md")
             let pre = try await prepareMeta(
-                runDir: runDir, topicsURL: topicsURL,
-                slug: "t\(started)-\(SessionName.suggest(from: topic))",
-                deadline: Deadline(seconds: perTopic)
+                runDir: runDir, topicsURL: topicsURL, slug: slug,
+                deadline: Deadline(seconds: perTopic), segment: segment
             )
             let code = try PiRunner.drivePi(
-                prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir),
+                prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir, segment: segment),
                 debug: debug, maxSteps: Self.topicMaxSteps
             )
             if code != 0 { Log.say("auto", "pi exited \(code) on this topic — continuing") }
@@ -130,7 +134,7 @@ struct AutoCommand: SiftSubcommand {
         }
 
         LlamaServer.stopLocalIfIdle()
-        Log.say("auto", "swept \(done) topic(s) — findings.db + report.md in \(runDir.path)")
+        Log.say("auto", "swept \(done) topic(s) — report.md in \(runDir.path)")
     }
 
     // MARK: - Phases
@@ -163,7 +167,8 @@ struct AutoCommand: SiftSubcommand {
     /// Shared prelaunch wiring: fresh pi context (`legSubdir`), and the
     /// worklist path exported so any agent can `sift queue` new leads.
     private func prepareMeta(
-        runDir: URL, topicsURL: URL, slug: String, deadline: Deadline?
+        runDir: URL, topicsURL: URL, slug: String, deadline: Deadline?,
+        segment: URL? = nil
     ) async throws -> PiRunner.Prelaunch {
         var pre = try await PiRunner.prepare(
             sessionDir: runDir, resuming: false,
@@ -171,12 +176,13 @@ struct AutoCommand: SiftSubcommand {
             legSubdir: slug.isEmpty ? "session" : slug
         )
         pre.env["SIFT_TOPIC_LIST"] = topicsURL.path
+        if let segment { pre.env["SIFT_SEGMENT"] = segment.path }
         return pre
     }
 
     // MARK: - Prompts
 
-    private func topicPrompt(_ topic: String, runDir: URL) -> String {
+    private func topicPrompt(_ topic: String, runDir: URL, segment: URL) -> String {
         var p = ""
         let digest = runDir.appending(path: "digest.md")
         if let d = try? String(contentsOf: digest, encoding: .utf8),
@@ -189,18 +195,19 @@ struct AutoCommand: SiftSubcommand {
                 \(topic)
 
             Search, read what matters, and pivot with `similar` / `expand` / \
-            `hubs` to follow the trail. Record findings AS YOU GO: the moment \
-            a document establishes a fact — a party, an account, an asset, a \
-            payment or an ownership/control link — create the FollowTheMoney \
-            entity with `sift entity create … --source <alias>` before your \
-            next search, and link related entities by alias (Payment, \
-            Ownership, Directorship, UnknownLink, …). Do not batch this to the \
-            end. Every document you open with `-f` must leave at least one \
-            entity behind — if it wouldn't, you didn't need the full read. A \
-            session that searches and reads but records no entities has \
-            produced nothing, however much you learned. If a document points \
-            to another lead worth its own pass, add it with `sift queue \
-            "<lead>"`. Stop when this lead is exhausted or the deadline nears.
+            `hubs` to follow the trail. Write your findings up AS YOU GO into \
+            `\(segment.path)` — your segment of the final report. The moment a \
+            document establishes something — a party, an account, an asset, a \
+            payment or an ownership/control link — append a sentence or two in \
+            neutral, wire-service prose, citing the source alias (`r4`) inline \
+            so every claim stays traceable. Don't batch this to the end. Open \
+            the section with a `## ` heading naming the lead. Every document \
+            you open with `-f` must leave something behind in the segment — if \
+            it wouldn't, you didn't need the full read. A session that searches \
+            and reads but writes nothing has produced nothing, however much you \
+            learned. If a document points to another lead worth its own pass, \
+            add it with `sift queue "<lead>"`. Stop when this lead is exhausted \
+            or the deadline nears.
             """
         return p
     }
@@ -218,7 +225,7 @@ struct AutoCommand: SiftSubcommand {
         angles that returned promising hits, split a clearly large subject \
         into separate leads, and drop angles the collection has nothing on. \
         This is reconnaissance, not the investigation: keep it to roughly a \
-        dozen searches, don't read deeply or record findings, and make sure \
+        dozen searches, don't read deeply or write anything up, and make sure \
         every lead is queued before you stop — an empty worklist means the \
         run does nothing.
 
@@ -229,39 +236,39 @@ struct AutoCommand: SiftSubcommand {
     }
 
     static let consolidatePrompt = """
-        Consolidate this run so far. List the findings recorded with `sift \
-        entity list` (and `sift entity show <alias>` where detail helps). \
-        Overwrite digest.md with a dense synthesis: what's been established, \
-        the entities and names that recur across topics, the strongest \
-        threads, and which directions later sessions should prioritise or \
-        skip as already covered. Keep it under ~400 words — it is prepended \
-        to every subsequent session, so every line has to earn its place. \
-        Don't run new searches; synthesise only what's already recorded, \
-        then write the file and stop.
+        Consolidate this run so far. Read every segment under `segments/` (each \
+        is one lead's write-up). Overwrite digest.md with a dense synthesis: \
+        what's been established, the parties and names that recur across leads, \
+        the strongest threads, and which directions later sessions should \
+        prioritise or skip as already covered. Keep it under ~400 words — it is \
+        prepended to every subsequent session, so every line has to earn its \
+        place. Don't run new searches; synthesise only what the segments \
+        already say, then write the file and stop.
         """
 
     static let reportPrompt = """
         The sweep is complete. Write report.md — the investigation's write-up \
-        — from the findings recorded this run. Read them with `sift entity \
-        list` and `sift entity show <alias>`: each entity prints its `id:`, \
-        and every source line prints its Aleph entity url. Read digest.md for \
-        the throughline.
+        — by stitching together the per-lead segments under `segments/`. Read \
+        every segment and digest.md for the throughline, then weave them into \
+        one coherent report: merge what overlaps, fold duplicated parties into \
+        a single account, flag where two segments contradict each other, and \
+        order the material so it reads as one investigation rather than a pile \
+        of leads.
 
         Write in neutral, wire-service prose: state what the documents show, \
         don't editorialise, don't call anything "major" / "explosive" / \
         "breakthrough", no exclamation marks. Structure it with descriptive \
-        section headers and full paragraphs; cite the source alias (e.g. `r4`) \
-        inline for each load-bearing claim, and use markdown tables for \
-        structured data (parties, dates, amounts).
+        section headers and full paragraphs; carry through the source alias \
+        (e.g. `r4`) the segments cite for each load-bearing claim, and use \
+        markdown tables for structured data (parties, dates, amounts).
 
         The report must stand on its own, so make every reference traceable. \
-        End with two tables. **Entities** — every recorded finding, one row \
-        per alias with its schema, caption, and `id`. **Sources** — every \
-        source alias you cited, with its Aleph entity id and a markdown link \
-        to its page, copying the url printed on the source line: \
-        `[open](<that url>)`. Then close with the open questions and suggested \
-        next steps a reporter would need to take it further. Write the file, \
-        then stop.
+        End with a **Sources** table — every source alias cited across the \
+        report, one row each, with a short note of what it is. To turn an \
+        alias into a link, `sift read <alias>` prints its Aleph entity url; \
+        use `[open](<that url>)`. Then close with the open questions and \
+        suggested next steps a reporter would need to take it further. Write \
+        the file, then stop.
         """
 }
 

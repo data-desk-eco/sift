@@ -31,10 +31,9 @@ struct SiftRoot: AsyncParsableCommand {
                 ReportCommand.self,
                 TimeCommand.self,
             ]),
-            // Structured findings: the agent's own FtM entities, plus the
-            // worklist tool it uses to queue freshly surfaced leads.
-            CommandGroup(name: "Findings", subcommands: [
-                EntityCommand.self,
+            // The worklist tool the agent uses to queue freshly surfaced
+            // leads for later sessions to pick up.
+            CommandGroup(name: "Leads", subcommands: [
                 QueueCommand.self,
             ]),
             // Human-facing — manage your sift install + auto runs.

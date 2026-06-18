@@ -10,8 +10,7 @@ public struct ReadInput: Sendable {
 }
 
 public func runRead(
-    client: AlephClient, store: Store, input: ReadInput,
-    findings: FindingsStore? = nil
+    client: AlephClient, store: Store, input: ReadInput
 ) async throws -> String {
     let eid = try store.resolveAlias(input.alias)
 
@@ -51,6 +50,7 @@ public func runRead(
     var lines: [String] = []
     lines.append("id:       \(eid)")
     lines.append("alias:    \(input.alias)")
+    if let url = alephEntityURL(eid) { lines.append("url:      \(url)") }
     lines.append("schema:   \(schema)")
     if !caption.isEmpty { lines.append("caption:  \(caption)") }
     let subject = Render.firstLabel(props["subject"])
@@ -74,11 +74,6 @@ public func runRead(
         lines.append("to:       \(rawTo)")
     }
 
-    if let findings, let cites = try? findings.citing(sourceId: eid), !cites.isEmpty {
-        let refs = cites.map { "\($0.alias) \($0.schema)" }.joined(separator: ", ")
-        lines.append("findings: \(refs)")
-    }
-
     lines.append(Render.rule)
     lines.append(bodyText.isEmpty ? "(no body text)" : bodyText)
 
@@ -88,4 +83,18 @@ public func runRead(
 
 private func pad(_ s: String, to width: Int) -> String {
     s.count >= width ? s : s + String(repeating: " ", count: width - s.count)
+}
+
+/// `<ALEPH_URL>/entities/<id>` — the web ui page for this entity, for
+/// citing as a link in a write-up. nil when no server url is in the env.
+/// The web ui lives at the bare host; an `/api/v2` suffix is the json api
+/// and won't render entity pages, so strip it.
+private func alephEntityURL(_ id: String) -> String? {
+    guard var base = ProcessInfo.processInfo.environment["ALEPH_URL"], !base.isEmpty
+    else { return nil }
+    if base.hasSuffix("/") { base.removeLast() }
+    if let r = base.range(of: #"/api/v?\d+/?$"#, options: .regularExpression) {
+        base = String(base[..<r.lowerBound])
+    }
+    return base.isEmpty ? nil : "\(base)/entities/\(id)"
 }
