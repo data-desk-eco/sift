@@ -2,82 +2,37 @@ import ArgumentParser
 import Foundation
 import SiftCore
 
-/// `sift auto BRIEF` — turn a freeform brief into a worklist of topics,
-/// then sweep them through the collection one fresh agent at a time.
-///
-/// Phases:
-///   0. **plan** — one agent reads the brief and queues a worklist of
-///      concrete leads into `topics.txt` (skipped on resume). If it recons
-///      but never queues, the worklist is seeded from its searches so the
-///      run still has something to sweep.
-///   1. **sweep** — for each topic, a fresh bounded pi session searches,
-///      reads, pivots, and writes up what it finds as a markdown segment
-///      under `segments/`. Every few topics a consolidation pass distils
-///      progress into digest.md, which is fed forward to later sessions.
-///   2. **report** — a final agent stitches the segments into report.md,
-///      reviewing for overlap and contradictions as it goes.
-///
-/// Each topic gets its own short-lived context so qwen never drags a
-/// previous topic's history forward (the slowdown that made the old
-/// long-running agent useless on this hardware). segments/, digest.md,
-/// and report.md are shared across the run.
+/// `sift auto BRIEF` — fan-out investigation. A thin launcher: unlock the
+/// vault, start the local model, inject Aleph creds + paths into the
+/// environment, then hand off to the bundled bash orchestrator
+/// (`orchestrate.sh`), which spawns one fresh headless pi session per phase
+/// and per lead. The new process per lead is the whole context-management
+/// strategy — no compaction, no deadline, no run-state sidecar. Run state is
+/// plain files under the run dir: `leads.txt` (worklist), `segments/*.md`
+/// (per-lead write-ups), `report.md` (the deliverable).
 struct AutoCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "auto",
         abstract: "Plan a worklist from a brief, then sweep it through the collection.",
         discussion: """
             BRIEF is any text or markdown file — a list of topics, or
-            freeform instructions. A planning agent breaks it into a
-            worklist (`topics.txt` in the run directory); then, for each
-            topic, sift boots a fresh pi session bounded by --time-limit
-            that searches the collection and writes up what it finds as a
-            markdown segment under `segments/`. Agents append new leads
-            with `sift queue`, so the sweep grows as it discovers them.
-            When the worklist is dry a final agent stitches the segments
+            freeform instructions. A planning pi session breaks it into a
+            worklist (`leads.txt` in the run directory); then, for each lead,
+            a fresh pi session searches the collection and writes up what it
+            finds under `segments/`. A final session stitches the segments
             into report.md.
 
-            Runs in the foreground: progress streams to the terminal and
-            ^C stops the sweep. The write-up lands in report.md inside the
-            run directory under the vault. Re-running resumes —
-            already-swept topics stay marked done.
+            Runs in the foreground: progress streams to the terminal and ^C
+            stops the sweep. The write-up lands in report.md inside the run
+            directory under the vault. Re-running resumes — leads whose
+            segment already exists are skipped.
             """
     )
 
     @Argument(help: "brief file — a topic list or freeform instructions")
     var list: String
-    @Option(name: [.short, .customLong("time-limit")],
-            help: "per-topic soft deadline (e.g. 20m, 1h); the agent self-paces")
-    var timeLimit: String?
-    @Flag(name: .customLong("debug"),
-          help: "stream raw pi events instead of the filtered terse log")
-    var debug: Bool = false
-
-    /// Run a consolidation pass after this many topics complete.
-    static let consolidateEvery = 3
-
-    /// Soft deadline for the recon plan phase, capped at the per-topic
-    /// budget so a tight `-t` bounds planning too. Soft only — it nudges
-    /// the planner to scope and stop, it doesn't kill the session.
-    static let planSeconds = 10 * 60
-
-    /// Cap on leads salvaged from the planner's searches when it recons but
-    /// never `sift queue`s — enough to seed a real sweep without exploding a
-    /// 50-search spree into 50 topics.
-    static let planSalvageLeads = 12
-
-    // Hard per-session tool-call backstops. These are runaway guards, not
-    // leashes. Topics are governed by the per-topic deadline (a wall-clock
-    // stop in drivePi), so the cap only needs to catch a session that loops
-    // without ever yielding to time — set it well above what 20m of healthy
-    // work produces. The old 80 was biting first, killing topics minutes
-    // short of their budget (often mid-step, before a segment was written).
-    // The plan phase is uncapped: reconnaissance plus one `sift queue` call
-    // per lead, so a healthy run easily clears 40, and it's supervised.
-    static let topicMaxSteps = 400
-    static let metaMaxSteps = 50
 
     func execute() async throws {
-        let perTopic = try timeLimit.map(Deadline.parseDuration) ?? 20 * 60
         let briefURL = URL(filePath: (list as NSString).expandingTildeInPath).absoluteURL
         guard FileManager.default.fileExists(atPath: briefURL.path) else {
             throw SiftError(
@@ -92,282 +47,48 @@ struct AutoCommand: SiftSubcommand {
         let mp = try requireVault()
         let researchDir = mp.appending(path: "research")
         try Paths.ensure(researchDir)
-
-        // The run dir is keyed off the brief filename so re-running the
-        // same brief resumes into the same segments/ / topics.txt.
+        // Run dir keyed off the brief filename so re-running resumes into the
+        // same leads.txt / segments/.
         let base = SessionName.suggest(from: briefURL.deletingPathExtension().lastPathComponent)
         let runDir = researchDir.appending(path: base.isEmpty ? "sweep" : base)
         try Paths.ensure(runDir)
-        let topicsURL = runDir.appending(path: "topics.txt")
-        let segmentsDir = runDir.appending(path: "segments")
-        try Paths.ensure(segmentsDir)
 
-        // Phase 0 — plan, unless a worklist already exists (resume).
-        if !FileManager.default.fileExists(atPath: topicsURL.path) {
-            try await plan(brief: briefURL, runDir: runDir, topicsURL: topicsURL,
-                           deadline: Deadline(seconds: min(perTopic, Self.planSeconds)))
+        // Reuse PiRunner.prepare for the careful wiring: llama-server started,
+        // backend configured, system prompt built, Aleph creds + shared
+        // aleph.sqlite path in the env, vault passphrase stripped.
+        let pre = try await PiRunner.prepare(
+            sessionDir: runDir, resuming: false, deadline: nil, skillDir: skillDir()
+        )
+        guard let pi = Paths.findExecutable("pi") else {
+            throw SiftError("the pi agent harness isn't installed",
+                            suggestion: "re-run the sift installer")
         }
-        guard Worklist.next(at: topicsURL) != nil else {
-            LlamaServer.stopLocalIfIdle()
+        let script = siftCLIResourceBundle().appending(path: "Resources/orchestrate.sh")
+
+        var env = pre.env
+        env["PI_BIN"] = pi
+        env["SIFT_SKILL"] = pre.skillDir.path
+        env["SIFT_SYSTEM_PROMPT"] = pre.systemPromptPath.path
+        // The agent shells out to `sift`; put it on PATH for the run.
+        env["PATH"] = Paths.executableDir.path + ":" + (env["PATH"] ?? "")
+
+        Log.say("auto", "sweep \(runDir.lastPathComponent)")
+        let p = Process()
+        p.executableURL = URL(filePath: "/bin/bash")
+        p.arguments = [script.path, runDir.path, briefURL.path]
+        p.environment = env
+        p.currentDirectoryURL = runDir
+        try p.run()
+        p.waitUntilExit()
+
+        LlamaServer.stopLocal()
+        if p.terminationStatus != 0 {
             throw SiftError(
-                "no topics to sweep",
-                suggestion: "the brief produced an empty worklist, or every topic is already done — delete \(topicsURL.path) to re-plan"
+                "the investigation run exited \(p.terminationStatus)",
+                suggestion: "see the output above; re-run to resume from where it stopped"
             )
         }
-
-        // Phase 1 — sweep.
-        Log.say("auto", "sweep \(runDir.lastPathComponent) — \(Deadline.formatRemaining(perTopic)) per topic")
-        var started = 0, done = 0
-        while let topic = Worklist.next(at: topicsURL) {
-            started += 1
-            Log.say("auto", "topic \(started): \(topic)")
-            let slug = "t\(started)-\(SessionName.suggest(from: topic))"
-            let segment = segmentsDir.appending(path: "\(slug).md")
-            let dl = Deadline(seconds: perTopic)
-            let pre = try await prepareMeta(
-                runDir: runDir, topicsURL: topicsURL, slug: slug,
-                deadline: dl, segment: segment, extensions: [noteNudgeExtension()]
-            )
-            let r = try PiRunner.drivePi(
-                prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir, segment: segment),
-                debug: debug, maxSteps: Self.topicMaxSteps, deadline: dl
-            )
-            if r.code != 0 { Log.say("auto", "pi exited \(r.code) on this topic — continuing") }
-            if !Self.captureIfMissing(segment, finalText: r.finalText) {
-                Log.say("auto", "topic \(started) wrote no segment — nothing to report from it")
-            }
-            Worklist.markDone(at: topicsURL, topic: topic)
-            done += 1
-
-            if done % Self.consolidateEvery == 0, Worklist.next(at: topicsURL) != nil {
-                try await runMeta(runDir: runDir, topicsURL: topicsURL,
-                                  slug: "digest-\(done)", prompt: Self.consolidatePrompt,
-                                  note: "consolidating after \(done) topics → digest.md",
-                                  target: runDir.appending(path: "digest.md"))
-            }
-        }
-
-        // Phase 2 — final write-up.
-        let report = runDir.appending(path: "report.md")
-        if done > 0 {
-            try await runMeta(runDir: runDir, topicsURL: topicsURL,
-                              slug: "report", prompt: Self.reportPrompt,
-                              note: "writing report.md", target: report)
-        }
-
-        LlamaServer.stopLocalIfIdle()
-        if Self.hasContent(report) {
-            Log.say("auto", "swept \(done) topic(s) — report.md in \(runDir.path)")
-        } else {
-            let n = ((try? FileManager.default.contentsOfDirectory(atPath: segmentsDir.path)) ?? [])
-                .filter { $0.hasSuffix(".md") }.count
-            Log.say("auto", "swept \(done) topic(s) — no report.md written; \(n) segment(s) in \(segmentsDir.path)")
-        }
     }
-
-    // MARK: - Deliverable capture
-
-    /// True if `url` exists and holds non-whitespace content.
-    static func hasContent(_ url: URL) -> Bool {
-        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        return !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// Guarantee the deliverable exists. The weak local model sometimes
-    /// investigates thoroughly but ends the turn without ever writing its
-    /// file — when that happens we salvage its closing prose as the file
-    /// so a phase that did the work still leaves something behind. Returns
-    /// whether the file ended up non-empty.
-    @discardableResult
-    static func captureIfMissing(_ url: URL, finalText: String) -> Bool {
-        if hasContent(url) { return true }
-        let t = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return false }
-        try? t.write(to: url, atomically: true, encoding: .utf8)
-        return true
-    }
-
-    // MARK: - Phases
-
-    private func plan(brief: URL, runDir: URL, topicsURL: URL, deadline: Deadline) async throws {
-        Log.say("auto", "planning worklist from \(brief.lastPathComponent) — \(Deadline.formatRemaining(deadline.remainingSeconds)) budget")
-        let raw = (try? String(contentsOf: brief, encoding: .utf8)) ?? ""
-        let pre = try await prepareMeta(
-            runDir: runDir, topicsURL: topicsURL, slug: "plan", deadline: deadline,
-            deadlineKind: .plan
-        )
-        var searches: [String] = []
-        _ = try PiRunner.drivePi(
-            prelaunch: pre, prompt: Self.planPrompt(String(raw.prefix(20000))),
-            debug: debug, maxSteps: nil,
-            onTool: { if let q = Self.searchQuery($0) { searches.append(q) } }
-        )
-        // The planner queues leads via `sift queue`, but its generic file
-        // tool can clobber the visible worklist (it once cut 16 queued
-        // leads to 3). Rebuild topics.txt from the hidden ledger so every
-        // queued lead reaches the sweep.
-        Worklist.rebuildFromLedger(at: topicsURL)
-        // Salvage: a planner that recons but never `sift queue`s leaves an
-        // empty worklist and the run aborts. Its searches *are* its
-        // candidate leads — seed the worklist from the distinct queries it
-        // ran (capped, in order) so the sweep still has something to chew on.
-        guard Worklist.next(at: topicsURL) == nil else { return }
-        var seen = Set<String>()
-        for q in searches where seen.insert(q.lowercased()).inserted {
-            try? Worklist.append(at: topicsURL, topic: q)
-            if seen.count >= Self.planSalvageLeads { break }
-        }
-        let n = Worklist.pending(at: topicsURL).count
-        if n > 0 { Log.say("auto", "planner queued nothing — seeded \(n) lead(s) from its searches") }
-    }
-
-    /// Pull the query term out of a `sift search "<q>" …` tool command,
-    /// dropping any trailing flags. nil for anything that isn't a search.
-    static func searchQuery(_ command: String) -> String? {
-        guard let r = command.range(of: "sift search ") else { return nil }
-        var rest = String(command[r.upperBound...])
-        if let f = rest.range(of: " --") { rest = String(rest[..<f.lowerBound]) }
-        rest = rest.trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-        return rest.isEmpty ? nil : rest
-    }
-
-    /// Run one non-topic agent (consolidate / report) to completion. When
-    /// `target` is given, fall back to the agent's closing prose if it
-    /// never wrote the file itself.
-    private func runMeta(
-        runDir: URL, topicsURL: URL, slug: String, prompt: String, note: String,
-        target: URL? = nil
-    ) async throws {
-        Log.say("auto", note)
-        let pre = try await prepareMeta(
-            runDir: runDir, topicsURL: topicsURL, slug: slug, deadline: nil
-        )
-        let r = try PiRunner.drivePi(
-            prelaunch: pre, prompt: prompt, debug: debug, maxSteps: Self.metaMaxSteps
-        )
-        if let target { Self.captureIfMissing(target, finalText: r.finalText) }
-    }
-
-    /// Shared prelaunch wiring: fresh pi context (`legSubdir`), and the
-    /// worklist path exported so any agent can `sift queue` new leads.
-    private func prepareMeta(
-        runDir: URL, topicsURL: URL, slug: String, deadline: Deadline?,
-        segment: URL? = nil, extensions: [URL] = [],
-        deadlineKind: SystemPrompt.DeadlineNote.Kind = .investigate
-    ) async throws -> PiRunner.Prelaunch {
-        var pre = try await PiRunner.prepare(
-            sessionDir: runDir, resuming: false,
-            deadline: deadline, skillDir: skillDir(), extensions: extensions,
-            legSubdir: slug.isEmpty ? "session" : slug,
-            deadlineKind: deadlineKind
-        )
-        pre.env["SIFT_TOPIC_LIST"] = topicsURL.path
-        if let segment { pre.env["SIFT_SEGMENT"] = segment.path }
-        return pre
-    }
-
-    // MARK: - Prompts
-
-    private func topicPrompt(_ topic: String, runDir: URL, segment: URL) -> String {
-        var p = ""
-        let digest = runDir.appending(path: "digest.md")
-        if let d = try? String(contentsOf: digest, encoding: .utf8),
-           !d.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            p += "What earlier sessions in this run have established:\n\n\(d)\n\n---\n\n"
-        }
-        p += """
-            Investigate this lead against the collection:
-
-                \(topic)
-
-            Search, read what matters, and pivot with `similar` / `expand` / \
-            `hubs` to follow the trail. Record findings AS YOU GO with \
-            `sift note "<finding>"` — one call per fact, which appends it to \
-            your segment of the final report. The moment a document \
-            establishes something — a party, an account, an asset, a payment \
-            or an ownership/control link — `sift note` a sentence or two in \
-            neutral, wire-service prose, citing the source alias (`r4`) inline \
-            so every claim stays traceable. Lead with a `sift note "## <lead>"` \
-            heading naming the lead. Don't batch this to the end and don't \
-            hand-edit the file — `sift note` is one call and it can't be lost \
-            to the deadline. Every document you open with `-f` must leave a \
-            note behind — if it wouldn't, you didn't need the full read. A \
-            session that searches and reads but notes nothing has produced \
-            nothing, however much you learned. If a document points to another \
-            lead worth its own pass, add it with `sift queue "<lead>"`. Stop \
-            when this lead is exhausted or the deadline nears.
-            """
-        return p
-    }
-
-    static func planPrompt(_ brief: String) -> String {
-        """
-        You're setting up an investigation from the operator's brief (below). \
-        Your one job here is to build the worklist: a set of `sift queue` \
-        calls, one per lead. Searching is only how you decide what to queue — \
-        a search you don't act on is wasted. Run `sift sources` first if you \
-        don't know what's loaded.
-
-        Work ONE angle at a time, and finish each before starting the next:
-
-          1. `sift search "<angle>"` to see if the collection has anything.
-          2. If it returned real hits, IMMEDIATELY `sift queue "<lead>"` for \
-        that angle — a single line of plain text (no newlines, balanced \
-        quotes), specific enough to search but not so granular it fragments. \
-        Do this in the very next call, before you search anything else.
-          3. If it returned nothing, drop it and move on. Don't queue dead \
-        angles.
-
-        Never let searches pile up unqueued — every promising search must be \
-        followed by its `sift queue` before the next search. Each `queue` call \
-        confirms the add (or says it's already there), so queue once and move \
-        on; don't re-add or cat the file to check. Split a clearly large \
-        subject into separate leads. This is reconnaissance, not the \
-        investigation: keep it to roughly a dozen angles, don't read deeply or \
-        write anything up. Stop once you've queued the leads worth a pass — an \
-        unqueued worklist means the run does nothing.
-
-        BRIEF:
-
-        \(brief)
-        """
-    }
-
-    static let consolidatePrompt = """
-        Consolidate this run so far. Read every segment under `segments/` (each \
-        is one lead's write-up). Overwrite digest.md with a dense synthesis: \
-        what's been established, the parties and names that recur across leads, \
-        the strongest threads, and which directions later sessions should \
-        prioritise or skip as already covered. Keep it under ~400 words — it is \
-        prepended to every subsequent session, so every line has to earn its \
-        place. Don't run new searches; synthesise only what the segments \
-        already say, then write the file and stop.
-        """
-
-    static let reportPrompt = """
-        The sweep is complete. Write report.md — the investigation's write-up \
-        — by stitching together the per-lead segments under `segments/`. Read \
-        every segment and digest.md for the throughline, then weave them into \
-        one coherent report: merge what overlaps, fold duplicated parties into \
-        a single account, flag where two segments contradict each other, and \
-        order the material so it reads as one investigation rather than a pile \
-        of leads.
-
-        Write in neutral, wire-service prose: state what the documents show, \
-        don't editorialise, don't call anything "major" / "explosive" / \
-        "breakthrough", no exclamation marks. Structure it with descriptive \
-        section headers and full paragraphs; carry through the source alias \
-        (e.g. `r4`) the segments cite for each load-bearing claim, and use \
-        markdown tables for structured data (parties, dates, amounts).
-
-        The report must stand on its own, so make every reference traceable. \
-        End with a **Sources** table — every source alias cited across the \
-        report, one row each, with a short note of what it is. To turn an \
-        alias into a link, `sift read <alias>` prints its Aleph entity url; \
-        use `[open](<that url>)`. Then close with the open questions and \
-        suggested next steps a reporter would need to take it further. Write \
-        the file, then stop.
-        """
 }
 
 // MARK: - Bundled-resource lookup
@@ -403,10 +124,4 @@ func skillDir() -> URL {
     // pi requires the --skill directory's name to match the skill name
     // (i.e. `sift`) and to contain only SKILL.md.
     siftCLIResourceBundle().appending(path: "Resources/sift")
-}
-
-/// The bundled pi extension that nudges a topic agent to flush findings to
-/// `sift note` as its context fills. Loaded only for topic sweeps.
-func noteNudgeExtension() -> URL {
-    siftCLIResourceBundle().appending(path: "Resources/note-nudge.ts")
 }
