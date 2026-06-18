@@ -280,11 +280,18 @@ struct RefResolver {
 // MARK: - Rendering
 
 /// `<ALEPH_URL>/entities/<id>` for an aleph-sourced finding, or nil when
-/// the source isn't an aleph entity or no server url is in the env.
+/// the source isn't an aleph entity or no server url is in the env. The
+/// web ui lives at the bare host; an `/api/v2` suffix is the json api and
+/// won't render entity pages, so strip it.
 private func alephLink(_ id: String, alias: String) -> String? {
-    guard alias.hasPrefix("r") else { return nil }
-    let base = ProcessInfo.processInfo.environment["ALEPH_URL"]
-    return Report.AliasLink(alias: alias, entityId: id, schema: nil, name: nil).url(server: base)
+    guard alias.hasPrefix("r"),
+          var base = ProcessInfo.processInfo.environment["ALEPH_URL"], !base.isEmpty
+    else { return nil }
+    if base.hasSuffix("/") { base.removeLast() }
+    if let r = base.range(of: #"/api/v?\d+/?$"#, options: .regularExpression) {
+        base = String(base[..<r.lowerBound])
+    }
+    return base.isEmpty ? nil : "\(base)/entities/\(id)"
 }
 
 private func render(

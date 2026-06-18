@@ -10,7 +10,7 @@ Native macOS tool for investigating subjects in Aleph / OpenAleph, plus a self-d
 
 - Swift 5.10, single SPM package at `Package.swift`. macOS 14+ on Apple Silicon.
 - Two targets: **`SiftCore`** (library; pure logic, no UI) and **`sift`** (CLI executable, target `SiftCLI`). sift is a CLI only — there's no GUI. (A SwiftUI menu-bar app once shipped here; it was removed because it earned nothing over the terminal.)
-- Dependencies: `swift-argument-parser` (CLI parsing), `swift-markdown` (HTML export AST). SQLite via the system `SQLite3` shim.
+- Dependencies: `swift-argument-parser` (CLI parsing). SQLite via the system `SQLite3` shim.
 - Vault logic in `SiftCore/VaultService.swift` (hdiutil sparseimage). Don't refactor without a clear reason — a regression here leaks credentials. The user picks the passphrase at `sift init`; sift never persists it. Every command that needs vault contents prompts for it once per boot via `requireVault()` in `SiftCLI/VaultPrompt.swift`, then reuses the existing `/Volumes/sift-vault-*` mount.
 - The agent's bundled `SKILL.md` and `AGENTS.md` ship as Swift target resources via `.copy("Resources")` — `sift/SKILL.md` keeps its subdirectory layout because pi requires the `--skill` directory name to match the skill name.
 

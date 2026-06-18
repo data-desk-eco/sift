@@ -16,8 +16,6 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git",
                  from: "1.5.0"),
-        .package(url: "https://github.com/apple/swift-markdown.git",
-                 from: "0.4.0"),
         // Pinned to the SPM package (rather than the toolchain-bundled
         // copy) so tests build on Command Line Tools alone — some CLT
         // releases ship a broken `_Testing_Foundation` cross-import
@@ -31,9 +29,6 @@ let package = Package(
     targets: [
         .target(
             name: "SiftCore",
-            dependencies: [
-                .product(name: "Markdown", package: "swift-markdown"),
-            ],
             path: "Sources/SiftCore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
