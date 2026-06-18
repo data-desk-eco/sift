@@ -15,6 +15,13 @@ public enum Worklist {
         return !t.isEmpty && !t.hasPrefix("#") && !t.hasPrefix("✓")
     }
 
+    /// Every pending topic, in file order.
+    public static func pending(at path: URL) -> [String] {
+        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [] }
+        return text.components(separatedBy: "\n").filter(isPending)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
     /// The next un-marked topic (trimmed), or nil when the list is dry.
     public static func next(at path: URL) -> String? {
         guard let text = try? String(contentsOf: path, encoding: .utf8) else { return nil }

@@ -57,7 +57,7 @@ Write your findings into the markdown segment at `$SIFT_SEGMENT` — your share 
 - **Neutral, wire-service prose.** State what the documents show; don't editorialise or hype. Use markdown tables for structured data (parties, dates, amounts).
 - **Cite the source alias inline** (`r512`) for every load-bearing claim, so each is traceable. `sift read <alias>` prints the entity's Aleph `url:` — use it for `[open](<url>)` links where a reader will want the source.
 - **Write as you go, never batched at the end.** A fact only in your context is lost when the session ends.
-- Surfaced another lead worth its own pass? `sift queue "<lead>"` — a later session picks it up.
+- Surfaced another lead worth its own pass? `sift queue "<lead>"` — a later session picks it up. It confirms each add (or says it's already queued); `sift queue --list` shows the worklist. Queue each lead once and trust it — no need to re-add or check the file.
 
 ## Aleph quirks
 

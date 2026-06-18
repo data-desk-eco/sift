@@ -273,7 +273,10 @@ struct AutoCommand: SiftSubcommand {
         leads AS YOU GO, not at the end: the moment a search confirms an angle \
         is worth a pass, add it with `sift queue "<lead>"` — one call per \
         lead, a single line of plain text (no newlines, keep quotes balanced), \
-        specific enough to search but not so granular it fragments. Favour \
+        specific enough to search but not so granular it fragments. Each \
+        `queue` call confirms the add (or tells you it's already there), so \
+        queue each lead once and move on — don't re-add or cat the file to \
+        check. Favour \
         angles that returned promising hits, split a clearly large subject \
         into separate leads, and drop angles the collection has nothing on. \
         This is reconnaissance, not the investigation: keep it to roughly a \

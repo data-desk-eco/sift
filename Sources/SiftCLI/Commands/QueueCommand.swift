@@ -13,13 +13,11 @@ struct QueueCommand: SiftSubcommand {
     )
 
     @Argument(help: "the lead to investigate later")
-    var topic: [String]
+    var topic: [String] = []
+    @Flag(name: .customLong("list"), help: "show the current worklist instead of adding")
+    var list: Bool = false
 
     func execute() async throws {
-        let text = topic.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            throw SiftError("nothing to queue", suggestion: "sift queue \"a lead worth chasing\"")
-        }
         guard let path = ProcessInfo.processInfo.environment["SIFT_TOPIC_LIST"],
               !path.isEmpty else {
             throw SiftError(
@@ -27,7 +25,22 @@ struct QueueCommand: SiftSubcommand {
                 suggestion: "`sift queue` only works inside a `sift auto` run"
             )
         }
-        try Worklist.append(at: URL(filePath: path), topic: text)
-        Log.say("queue", "added: \(text)")
+        let url = URL(filePath: path)
+        let text = topic.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // No lead (or `--list`): print the worklist so the agent can
+        // confirm what's queued instead of re-adding to check.
+        if list || text.isEmpty {
+            let pending = Worklist.pending(at: url)
+            guard !pending.isEmpty else { return Log.say("queue", "worklist empty") }
+            Log.say("queue", "\(pending.count) queued:")
+            for (i, t) in pending.enumerated() { Log.say("queue", "  \(i + 1). \(t)") }
+            return
+        }
+
+        let before = Worklist.pending(at: url)
+        try Worklist.append(at: url, topic: text)
+        let now = Worklist.pending(at: url).count
+        Log.say("queue", before.contains(text) ? "already queued (\(now) total)" : "added (\(now) total): \(text)")
     }
 }
