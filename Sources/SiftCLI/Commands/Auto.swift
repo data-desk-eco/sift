@@ -7,7 +7,9 @@ import SiftCore
 ///
 /// Phases:
 ///   0. **plan** — one agent reads the brief and queues a worklist of
-///      concrete leads into `topics.txt` (skipped on resume).
+///      concrete leads into `topics.txt` (skipped on resume). If it recons
+///      but never queues, the worklist is seeded from its searches so the
+///      run still has something to sweep.
 ///   1. **sweep** — for each topic, a fresh bounded pi session searches,
 ///      reads, pivots, and writes up what it finds as a markdown segment
 ///      under `segments/`. Every few topics a consolidation pass distils
@@ -58,6 +60,11 @@ struct AutoCommand: SiftSubcommand {
     /// the planner to scope and stop, it doesn't kill the session.
     static let planSeconds = 10 * 60
 
+    /// Cap on leads salvaged from the planner's searches when it recons but
+    /// never `sift queue`s — enough to seed a real sweep without exploding a
+    /// 50-search spree into 50 topics.
+    static let planSalvageLeads = 12
+
     // Hard per-session tool-call backstops. These are runaway guards, not
     // leashes. Topics are governed by the per-topic deadline (a wall-clock
     // stop in drivePi), so the cap only needs to catch a session that loops
@@ -99,11 +106,6 @@ struct AutoCommand: SiftSubcommand {
         if !FileManager.default.fileExists(atPath: topicsURL.path) {
             try await plan(brief: briefURL, runDir: runDir, topicsURL: topicsURL,
                            deadline: Deadline(seconds: min(perTopic, Self.planSeconds)))
-            // The planner queues leads via `sift queue`, but its generic
-            // file tool can clobber the visible worklist (it once cut 16
-            // queued leads to 3). Rebuild topics.txt from the hidden
-            // ledger so every queued lead reaches the sweep.
-            Worklist.rebuildFromLedger(at: topicsURL)
         }
         guard Worklist.next(at: topicsURL) != nil else {
             LlamaServer.stopLocalIfIdle()
@@ -194,10 +196,39 @@ struct AutoCommand: SiftSubcommand {
             runDir: runDir, topicsURL: topicsURL, slug: "plan", deadline: deadline,
             deadlineKind: .plan
         )
+        var searches: [String] = []
         _ = try PiRunner.drivePi(
             prelaunch: pre, prompt: Self.planPrompt(String(raw.prefix(20000))),
-            debug: debug, maxSteps: nil
+            debug: debug, maxSteps: nil,
+            onTool: { if let q = Self.searchQuery($0) { searches.append(q) } }
         )
+        // The planner queues leads via `sift queue`, but its generic file
+        // tool can clobber the visible worklist (it once cut 16 queued
+        // leads to 3). Rebuild topics.txt from the hidden ledger so every
+        // queued lead reaches the sweep.
+        Worklist.rebuildFromLedger(at: topicsURL)
+        // Salvage: a planner that recons but never `sift queue`s leaves an
+        // empty worklist and the run aborts. Its searches *are* its
+        // candidate leads — seed the worklist from the distinct queries it
+        // ran (capped, in order) so the sweep still has something to chew on.
+        guard Worklist.next(at: topicsURL) == nil else { return }
+        var seen = Set<String>()
+        for q in searches where seen.insert(q.lowercased()).inserted {
+            try? Worklist.append(at: topicsURL, topic: q)
+            if seen.count >= Self.planSalvageLeads { break }
+        }
+        let n = Worklist.pending(at: topicsURL).count
+        if n > 0 { Log.say("auto", "planner queued nothing — seeded \(n) lead(s) from its searches") }
+    }
+
+    /// Pull the query term out of a `sift search "<q>" …` tool command,
+    /// dropping any trailing flags. nil for anything that isn't a search.
+    static func searchQuery(_ command: String) -> String? {
+        guard let r = command.range(of: "sift search ") else { return nil }
+        var rest = String(command[r.upperBound...])
+        if let f = rest.range(of: " --") { rest = String(rest[..<f.lowerBound]) }
+        rest = rest.trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
+        return rest.isEmpty ? nil : rest
     }
 
     /// Run one non-topic agent (consolidate / report) to completion. When

@@ -136,7 +136,8 @@ public enum PiRunner {
     /// loses only the in-flight call, not work already written down.
     public static func drivePi(
         prelaunch: Prelaunch, prompt: String, debug: Bool,
-        maxSteps: Int? = nil, deadline: Deadline? = nil
+        maxSteps: Int? = nil, deadline: Deadline? = nil,
+        onTool: ((String) -> Void)? = nil
     ) throws -> (code: Int32, finalText: String) {
         // `--no-session`: every sweep phase is a fresh, never-resumed
         // context, so persisting pi's conversation (and the compaction it
@@ -179,7 +180,7 @@ public enum PiRunner {
                 if dropping { dropping = false; continue }
                 guard let line = String(data: lineData, encoding: .utf8) else { continue }
                 for event in stream.ingest(line) {
-                    if event.scope == "tool" { steps += 1 }
+                    if event.scope == "tool" { steps += 1; onTool?(event.message) }
                     guard !event.formatted.isEmpty else { continue }
                     let rendered = event.isFinalText
                         ? event.formatted + "\n"
