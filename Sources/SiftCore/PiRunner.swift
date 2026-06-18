@@ -124,16 +124,19 @@ public enum PiRunner {
     /// echo rendered lines to stderr so the operator sees searches and
     /// write-ups land in real time. Returns pi's termination status.
     ///
-    /// `maxSteps` is a hard backstop: when the agent has made that many
-    /// tool calls we end the session (SIGTERM). pi has no step/token cap
-    /// of its own and the soft deadline has no teeth in `--print` mode,
-    /// so on this hardware a session that won't stop itself just gets
-    /// slower as its context grows. The agent writes its segment as it
-    /// goes, so ending a session mid-step loses only the in-flight call,
-    /// not work already written down. The cap is a backstop —
-    /// the prompt and deadline should normally stop the agent first.
+    /// A topic ends on whichever hard stop comes first: `deadline` (a
+    /// wall-clock SIGTERM) or `maxSteps` (a tool-call SIGTERM). pi has no
+    /// step/token cap of its own, and the soft deadline that `sift time`
+    /// reports has no teeth in `--print` mode — left to self-pace the agent
+    /// stops early (often without writing) or, on this hardware, just gets
+    /// slower as its context grows. So `deadline` is the real governor: it
+    /// holds a topic to its full time budget instead of an arbitrary call
+    /// count that lands minutes short. `maxSteps` is now only a runaway
+    /// backstop. The agent writes its segment as it goes, so ending mid-step
+    /// loses only the in-flight call, not work already written down.
     public static func drivePi(
-        prelaunch: Prelaunch, prompt: String, debug: Bool, maxSteps: Int? = nil
+        prelaunch: Prelaunch, prompt: String, debug: Bool,
+        maxSteps: Int? = nil, deadline: Deadline? = nil
     ) throws -> (code: Int32, finalText: String) {
         // `--no-session`: every sweep phase is a fresh, never-resumed
         // context, so persisting pi's conversation (and the compaction it
@@ -189,6 +192,17 @@ public enum PiRunner {
                     capped = true
                     try? out.write(contentsOf: Data(
                         "\(stamp()) [limit]   \(cap) tool calls — ending this session\n".utf8
+                    ))
+                    pi.terminate()
+                    break readLoop
+                }
+                // Wall-clock stop: hold the topic to its full time budget.
+                // Checked as events stream (between tool calls), so it fires
+                // within a call of the deadline, not to the millisecond.
+                if let dl = deadline, dl.remainingSeconds <= 0 {
+                    capped = true
+                    try? out.write(contentsOf: Data(
+                        "\(stamp()) [deadline] time budget reached — ending this session\n".utf8
                     ))
                     pi.terminate()
                     break readLoop

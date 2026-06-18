@@ -59,12 +59,14 @@ struct AutoCommand: SiftSubcommand {
     static let planSeconds = 10 * 60
 
     // Hard per-session tool-call backstops. These are runaway guards, not
-    // leashes — set well above a healthy session (topics here run ~15-25
-    // calls) so the prompt and deadline are the normal stop, and the cap
-    // only fires on a session that won't stop itself. The plan phase is
-    // uncapped: it's reconnaissance plus one `sift queue` call per lead,
-    // so a healthy run easily clears 40, and it's foreground-supervised.
-    static let topicMaxSteps = 80
+    // leashes. Topics are governed by the per-topic deadline (a wall-clock
+    // stop in drivePi), so the cap only needs to catch a session that loops
+    // without ever yielding to time — set it well above what 20m of healthy
+    // work produces. The old 80 was biting first, killing topics minutes
+    // short of their budget (often mid-step, before a segment was written).
+    // The plan phase is uncapped: reconnaissance plus one `sift queue` call
+    // per lead, so a healthy run easily clears 40, and it's supervised.
+    static let topicMaxSteps = 400
     static let metaMaxSteps = 50
 
     func execute() async throws {
@@ -119,13 +121,14 @@ struct AutoCommand: SiftSubcommand {
             Log.say("auto", "topic \(started): \(topic)")
             let slug = "t\(started)-\(SessionName.suggest(from: topic))"
             let segment = segmentsDir.appending(path: "\(slug).md")
+            let dl = Deadline(seconds: perTopic)
             let pre = try await prepareMeta(
                 runDir: runDir, topicsURL: topicsURL, slug: slug,
-                deadline: Deadline(seconds: perTopic), segment: segment
+                deadline: dl, segment: segment
             )
             let r = try PiRunner.drivePi(
                 prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir, segment: segment),
-                debug: debug, maxSteps: Self.topicMaxSteps
+                debug: debug, maxSteps: Self.topicMaxSteps, deadline: dl
             )
             if r.code != 0 { Log.say("auto", "pi exited \(r.code) on this topic — continuing") }
             if !Self.captureIfMissing(segment, finalText: r.finalText) {
