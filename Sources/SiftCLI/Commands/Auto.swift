@@ -56,9 +56,10 @@ struct AutoCommand: SiftSubcommand {
     // Hard per-session tool-call backstops. These are runaway guards, not
     // leashes — set well above a healthy session (topics here run ~15-25
     // calls) so the prompt and deadline are the normal stop, and the cap
-    // only fires on a session that won't stop itself.
+    // only fires on a session that won't stop itself. The plan phase is
+    // uncapped: it's reconnaissance plus one `sift queue` call per lead,
+    // so a healthy run easily clears 40, and it's foreground-supervised.
     static let topicMaxSteps = 80
-    static let planMaxSteps = 40
     static let metaMaxSteps = 50
 
     func execute() async throws {
@@ -147,7 +148,7 @@ struct AutoCommand: SiftSubcommand {
         )
         _ = try PiRunner.drivePi(
             prelaunch: pre, prompt: Self.planPrompt(String(raw.prefix(20000))),
-            debug: debug, maxSteps: Self.planMaxSteps
+            debug: debug, maxSteps: nil
         )
     }
 
