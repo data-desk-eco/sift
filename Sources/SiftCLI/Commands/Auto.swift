@@ -126,7 +126,7 @@ struct AutoCommand: SiftSubcommand {
             let dl = Deadline(seconds: perTopic)
             let pre = try await prepareMeta(
                 runDir: runDir, topicsURL: topicsURL, slug: slug,
-                deadline: dl, segment: segment
+                deadline: dl, segment: segment, extensions: [noteNudgeExtension()]
             )
             let r = try PiRunner.drivePi(
                 prelaunch: pre, prompt: topicPrompt(topic, runDir: runDir, segment: segment),
@@ -252,12 +252,12 @@ struct AutoCommand: SiftSubcommand {
     /// worklist path exported so any agent can `sift queue` new leads.
     private func prepareMeta(
         runDir: URL, topicsURL: URL, slug: String, deadline: Deadline?,
-        segment: URL? = nil,
+        segment: URL? = nil, extensions: [URL] = [],
         deadlineKind: SystemPrompt.DeadlineNote.Kind = .investigate
     ) async throws -> PiRunner.Prelaunch {
         var pre = try await PiRunner.prepare(
             sessionDir: runDir, resuming: false,
-            deadline: deadline, skillDir: skillDir(),
+            deadline: deadline, skillDir: skillDir(), extensions: extensions,
             legSubdir: slug.isEmpty ? "session" : slug,
             deadlineKind: deadlineKind
         )
@@ -403,4 +403,10 @@ func skillDir() -> URL {
     // pi requires the --skill directory's name to match the skill name
     // (i.e. `sift`) and to contain only SKILL.md.
     siftCLIResourceBundle().appending(path: "Resources/sift")
+}
+
+/// The bundled pi extension that nudges a topic agent to flush findings to
+/// `sift note` as its context fills. Loaded only for topic sweeps.
+func noteNudgeExtension() -> URL {
+    siftCLIResourceBundle().appending(path: "Resources/note-nudge.ts")
 }

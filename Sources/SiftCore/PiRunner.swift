@@ -17,6 +17,7 @@ public enum PiRunner {
         public var env: [String: String]
         public var systemPromptPath: URL
         public var skillDir: URL
+        public var extensions: [URL]
         public var piSessionDir: URL
     }
 
@@ -30,6 +31,7 @@ public enum PiRunner {
     public static func prepare(
         sessionDir: URL, resuming: Bool,
         deadline: Deadline?, skillDir: URL,
+        extensions: [URL] = [],
         legSubdir: String? = nil,
         deadlineKind: SystemPrompt.DeadlineNote.Kind = .investigate
     ) async throws -> Prelaunch {
@@ -103,6 +105,7 @@ public enum PiRunner {
             env: env,
             systemPromptPath: promptPath,
             skillDir: skillDir,
+            extensions: extensions.filter { FileManager.default.fileExists(atPath: $0.path) },
             piSessionDir: piSessionDir
         )
     }
@@ -113,6 +116,7 @@ public enum PiRunner {
             "--skill", prelaunch.skillDir.path,
             "--session-dir", prelaunch.piSessionDir.path,
         ]
+        for ext in prelaunch.extensions { args += ["--extension", ext.path] }
         if prelaunch.resuming, prelaunch.hasPriorPiHistory {
             args.append("--continue")
         }
