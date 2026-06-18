@@ -301,22 +301,29 @@ struct AutoCommand: SiftSubcommand {
     static func planPrompt(_ brief: String) -> String {
         """
         You're setting up an investigation from the operator's brief (below). \
-        Scout the collection briefly — a handful of `sift search` calls (and \
-        `sift sources` if you don't know what's loaded) to see which names, \
-        entities, and threads return hits and which return nothing. Queue \
-        leads AS YOU GO, not at the end: the moment a search confirms an angle \
-        is worth a pass, add it with `sift queue "<lead>"` — one call per \
-        lead, a single line of plain text (no newlines, keep quotes balanced), \
-        specific enough to search but not so granular it fragments. Each \
-        `queue` call confirms the add (or tells you it's already there), so \
-        queue each lead once and move on — don't re-add or cat the file to \
-        check. Favour \
-        angles that returned promising hits, split a clearly large subject \
-        into separate leads, and drop angles the collection has nothing on. \
-        This is reconnaissance, not the investigation: keep it to roughly a \
-        dozen searches, don't read deeply or write anything up, and make sure \
-        every lead is queued before you stop — an empty worklist means the \
-        run does nothing.
+        Your one job here is to build the worklist: a set of `sift queue` \
+        calls, one per lead. Searching is only how you decide what to queue — \
+        a search you don't act on is wasted. Run `sift sources` first if you \
+        don't know what's loaded.
+
+        Work ONE angle at a time, and finish each before starting the next:
+
+          1. `sift search "<angle>"` to see if the collection has anything.
+          2. If it returned real hits, IMMEDIATELY `sift queue "<lead>"` for \
+        that angle — a single line of plain text (no newlines, balanced \
+        quotes), specific enough to search but not so granular it fragments. \
+        Do this in the very next call, before you search anything else.
+          3. If it returned nothing, drop it and move on. Don't queue dead \
+        angles.
+
+        Never let searches pile up unqueued — every promising search must be \
+        followed by its `sift queue` before the next search. Each `queue` call \
+        confirms the add (or says it's already there), so queue once and move \
+        on; don't re-add or cat the file to check. Split a clearly large \
+        subject into separate leads. This is reconnaissance, not the \
+        investigation: keep it to roughly a dozen angles, don't read deeply or \
+        write anything up. Stop once you've queued the leads worth a pass — an \
+        unqueued worklist means the run does nothing.
 
         BRIEF:
 
