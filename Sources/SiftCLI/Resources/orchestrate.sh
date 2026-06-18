@@ -17,8 +17,10 @@ RUN_DIR="$1"; BRIEF="$2"
 SEG="$RUN_DIR/segments"; LEADS="$RUN_DIR/leads.txt"; REPORT="$RUN_DIR/report.md"
 mkdir -p "$SEG"
 
+# stream pi's events through `sift render` so the live agent activity —
+# searches, reads, the write-up — lands on stdout, fun to watch.
 run_pi() { "$PI_BIN" --skill "$SIFT_SKILL" --system-prompt "$SIFT_SYSTEM_PROMPT" \
-    --no-session -p --mode text "$1"; }
+    --no-session -p --mode json "$1" | sift render; }
 slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' \
     | sed 's/^-//;s/-$//' | cut -c1-40; }
 segfile() { printf '%s/%s-%s.md' "$SEG" "$(slug "$1")" "$(printf '%s' "$1" | shasum | cut -c1-6)"; }

@@ -46,6 +46,7 @@ struct SiftRoot: AsyncParsableCommand {
             ]),
             CommandGroup(name: "Auto", subcommands: [
                 AutoCommand.self,
+                RenderCommand.self,
             ]),
         ]
     )

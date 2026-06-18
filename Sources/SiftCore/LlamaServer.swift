@@ -54,13 +54,13 @@ public enum LlamaServer {
         guard config.kind == .local else { return }
         let port = config.port ?? Backend.defaultLocalPort
         if healthCheck(port: port) {
-            // A long-lived llama-server accumulates KV cache state and
-            // gets progressively slower — second-and-later topic sessions
-            // were taking minutes to produce their first token. `auto`
-            // runs one pi at a time, so a server already on the port is
-            // always stale: kill it so this topic gets a clean boot.
-            Log.say("server", "recycling stale llama-server on :\(port)")
-            stopLocal()
+            // Reuse a server that's already up. Every lead is its own fresh
+            // pi process making independent completion requests, so a warm
+            // server doesn't go stale the way the old long-lived per-run
+            // context did — and reusing it skips a multi-second model reload
+            // (~14 GB) on every start, including across ^C'd runs.
+            Log.say("server", "reusing llama-server on :\(port)")
+            return
         }
         let modelPath = Paths.modelsDir.appending(path: config.modelFile ?? Backend.defaultModelFile)
         guard FileManager.default.fileExists(atPath: modelPath.path) else {
@@ -174,12 +174,6 @@ public enum LlamaServer {
             if kill(pid, 0) != 0 { return }
         }
         kill(pid, SIGKILL)
-    }
-
-    /// Stop llama-server. Called by `auto` once its topic sweep finishes
-    /// so the model stops pinning ~14 GB of unified memory.
-    public static func stopLocalIfIdle() {
-        stopLocal()
     }
 
     // MARK: - Install + model download
