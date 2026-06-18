@@ -53,6 +53,11 @@ struct AutoCommand: SiftSubcommand {
     /// Run a consolidation pass after this many topics complete.
     static let consolidateEvery = 3
 
+    /// Soft deadline for the recon plan phase, capped at the per-topic
+    /// budget so a tight `-t` bounds planning too. Soft only — it nudges
+    /// the planner to scope and stop, it doesn't kill the session.
+    static let planSeconds = 10 * 60
+
     // Hard per-session tool-call backstops. These are runaway guards, not
     // leashes — set well above a healthy session (topics here run ~15-25
     // calls) so the prompt and deadline are the normal stop, and the cap
@@ -90,7 +95,8 @@ struct AutoCommand: SiftSubcommand {
 
         // Phase 0 — plan, unless a worklist already exists (resume).
         if !FileManager.default.fileExists(atPath: topicsURL.path) {
-            try await plan(brief: briefURL, runDir: runDir, topicsURL: topicsURL)
+            try await plan(brief: briefURL, runDir: runDir, topicsURL: topicsURL,
+                           deadline: Deadline(seconds: min(perTopic, Self.planSeconds)))
         }
         guard Worklist.next(at: topicsURL) != nil else {
             LlamaServer.stopLocalIfIdle()
@@ -140,11 +146,12 @@ struct AutoCommand: SiftSubcommand {
 
     // MARK: - Phases
 
-    private func plan(brief: URL, runDir: URL, topicsURL: URL) async throws {
-        Log.say("auto", "planning worklist from \(brief.lastPathComponent)")
+    private func plan(brief: URL, runDir: URL, topicsURL: URL, deadline: Deadline) async throws {
+        Log.say("auto", "planning worklist from \(brief.lastPathComponent) — \(Deadline.formatRemaining(deadline.remainingSeconds)) budget")
         let raw = (try? String(contentsOf: brief, encoding: .utf8)) ?? ""
         let pre = try await prepareMeta(
-            runDir: runDir, topicsURL: topicsURL, slug: "plan", deadline: nil
+            runDir: runDir, topicsURL: topicsURL, slug: "plan", deadline: deadline,
+            deadlineKind: .plan
         )
         _ = try PiRunner.drivePi(
             prelaunch: pre, prompt: Self.planPrompt(String(raw.prefix(20000))),
@@ -169,12 +176,14 @@ struct AutoCommand: SiftSubcommand {
     /// worklist path exported so any agent can `sift queue` new leads.
     private func prepareMeta(
         runDir: URL, topicsURL: URL, slug: String, deadline: Deadline?,
-        segment: URL? = nil
+        segment: URL? = nil,
+        deadlineKind: SystemPrompt.DeadlineNote.Kind = .investigate
     ) async throws -> PiRunner.Prelaunch {
         var pre = try await PiRunner.prepare(
             sessionDir: runDir, resuming: false,
             deadline: deadline, skillDir: skillDir(),
-            legSubdir: slug.isEmpty ? "session" : slug
+            legSubdir: slug.isEmpty ? "session" : slug,
+            deadlineKind: deadlineKind
         )
         pre.env["SIFT_TOPIC_LIST"] = topicsURL.path
         if let segment { pre.env["SIFT_SEGMENT"] = segment.path }

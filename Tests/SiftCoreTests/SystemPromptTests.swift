@@ -91,6 +91,35 @@ import Testing
             #expect(body.contains("## Deadline"))
             #expect(body.contains("30 minute"))
             #expect(body.contains("15:30"))
+            // Default kind is .investigate — pushes depth, not queueing.
+            #expect(body.contains("investigation"))
+            #expect(!body.contains("sift queue"))
+        }
+    }
+
+    @Test func planDeadlineNoteUsesReconFraming() throws {
+        try withTempHome { _ in
+            let tmp = FileManager.default.temporaryDirectory
+                .appending(path: "fixtures-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let agentsURL = tmp.appending(path: "AGENTS.md")
+            let skillURL = tmp.appending(path: "SKILL.md")
+            try "A".write(to: agentsURL, atomically: true, encoding: .utf8)
+            try "S".write(to: skillURL, atomically: true, encoding: .utf8)
+
+            SystemPrompt.resourceFinder = {
+                .init(agentsMD: agentsURL, skillMD: skillURL)
+            }
+            let outURL = try SystemPrompt.build(
+                deadlineNote: .init(totalMinutes: 10, endLocalTime: "15:30", kind: .plan)
+            )
+            let body = try String(contentsOf: outURL, encoding: .utf8)
+            #expect(body.contains("## Deadline"))
+            // Recon framing: queue leads and stop, don't go deep.
+            #expect(body.contains("sift queue"))
+            #expect(body.contains("scope the investigation"))
+            #expect(!body.contains("stopped too early"))
         }
     }
 

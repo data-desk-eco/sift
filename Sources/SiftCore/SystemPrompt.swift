@@ -21,11 +21,17 @@ public enum SystemPrompt {
     }
 
     public struct DeadlineNote: Sendable {
+        /// What the session is for — the deadline is framed differently
+        /// for a topic investigation (use the time, go deep) than for the
+        /// reconnaissance plan phase (scope it and stop, don't investigate).
+        public enum Kind: Sendable { case investigate, plan }
         public let totalMinutes: Int
         public let endLocalTime: String
-        public init(totalMinutes: Int, endLocalTime: String) {
+        public let kind: Kind
+        public init(totalMinutes: Int, endLocalTime: String, kind: Kind = .investigate) {
             self.totalMinutes = totalMinutes
             self.endLocalTime = endLocalTime
+            self.kind = kind
         }
     }
 
@@ -53,19 +59,31 @@ public enum SystemPrompt {
         }
         if let dl = deadlineNote {
             parts.append("\n\n## Deadline\n\n")
-            parts.append(
-                "This session has a soft deadline of \(dl.totalMinutes) minute(s), "
-                + "ending around \(dl.endLocalTime) local time. The budget is a "
-                + "target depth, not a cap to finish under — the user picked it "
-                + "because they want roughly that much investigation. If you find "
-                + "yourself ready to stop with substantial time left, you've "
-                + "almost certainly stopped too early: re-read sources you skimmed, "
-                + "verify findings against fresh searches, broaden the question, "
-                + "or pursue leads you noted but didn't follow. After every few "
-                + "tool calls, run `sift time` to see remaining time and pacing "
-                + "guidance. The deadline itself is soft — there's no hard kill — "
-                + "but write up what you found in your segment before you stop."
-            )
+            let opening = "This session has a soft deadline of \(dl.totalMinutes) minute(s), "
+                + "ending around \(dl.endLocalTime) local time. "
+            switch dl.kind {
+            case .investigate:
+                parts.append(opening
+                    + "The budget is a target depth, not a cap to finish under — the "
+                    + "user picked it because they want roughly that much investigation. "
+                    + "If you find yourself ready to stop with substantial time left, "
+                    + "you've almost certainly stopped too early: re-read sources you "
+                    + "skimmed, verify findings against fresh searches, broaden the "
+                    + "question, or pursue leads you noted but didn't follow. After every "
+                    + "few tool calls, run `sift time` to see remaining time and pacing "
+                    + "guidance. The deadline itself is soft — there's no hard kill — but "
+                    + "write up what you found in your segment before you stop.")
+            case .plan:
+                parts.append(opening
+                    + "It's your window to scope the investigation, not to run it: search "
+                    + "broadly to see what the collection holds and queue every angle "
+                    + "worth a pass with `sift queue`. It's a budget, not a target to fill "
+                    + "— once the worklist covers the brief, stop; don't start "
+                    + "investigating the leads yourself or reading deeply. Run `sift time` "
+                    + "every few tool calls to check remaining time. The deadline is soft "
+                    + "— there's no hard kill — but make sure every lead is queued before "
+                    + "you stop.")
+            }
         }
 
         try Paths.ensureSiftHome()

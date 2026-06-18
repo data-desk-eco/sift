@@ -30,7 +30,8 @@ public enum PiRunner {
     public static func prepare(
         sessionDir: URL, resuming: Bool,
         deadline: Deadline?, skillDir: URL,
-        legSubdir: String? = nil
+        legSubdir: String? = nil,
+        deadlineKind: SystemPrompt.DeadlineNote.Kind = .investigate
     ) async throws -> Prelaunch {
         try Sift.ensureInitialized()
         try requirePi()
@@ -41,7 +42,8 @@ public enum PiRunner {
         let dlNote = deadline.map { dl in
             SystemPrompt.DeadlineNote(
                 totalMinutes: max(1, (dl.endTimestamp - dl.startTimestamp) / 60),
-                endLocalTime: localTimeShort(dl.endTimestamp)
+                endLocalTime: localTimeShort(dl.endTimestamp),
+                kind: deadlineKind
             )
         }
         let promptPath = try SystemPrompt.build(deadlineNote: dlNote)

@@ -73,13 +73,13 @@ public struct Deadline: Sendable {
         if remainingSeconds <= 0 {
             return Phase(
                 name: "overrun",
-                guidance: "deadline passed — write up anything not yet in your segment, then stop. Don't open new threads."
+                guidance: "deadline passed — save anything you've found but not yet written down, then stop. Don't open new threads."
             )
         }
         if frac < 0.10 {
             return Phase(
                 name: "wrap-up",
-                guidance: "wrap up — write up anything not yet in your segment. Finish the current tool call only; no new searches."
+                guidance: "wrap up — save anything you've found but not yet written down. Finish the current tool call only; no new searches."
             )
         }
         if frac < 0.25 {
