@@ -35,6 +35,7 @@ struct SiftRoot: AsyncParsableCommand {
             // leads for later sessions to pick up.
             CommandGroup(name: "Leads", subcommands: [
                 QueueCommand.self,
+                NoteCommand.self,
             ]),
             // Human-facing — manage your sift install + auto runs.
             CommandGroup(name: "Setup", subcommands: [

@@ -52,11 +52,11 @@ Flags belong to specific commands — there are no universal ones. `--limit` / `
 
 ## Writing it up
 
-Write your findings into the markdown segment at `$SIFT_SEGMENT` — your share of the final report, which a later pass stitches together. Open it with a `## ` heading naming the lead, then add to it as you go:
+Record findings with `sift note "<finding>"` — one call per fact, which appends it to the markdown segment at `$SIFT_SEGMENT`, your share of the final report. Don't hand-edit the file: `sift note` is a single append that can't be lost to the deadline. Lead with `sift note "## <lead>"` to title your section, then add to it as you go:
 
-- **Neutral, wire-service prose.** State what the documents show; don't editorialise or hype. Use markdown tables for structured data (parties, dates, amounts).
+- **Neutral, wire-service prose.** State what the documents show; don't editorialise or hype. For structured data (parties, dates, amounts), pass a whole markdown table as one note.
 - **Cite the source alias inline** (`r512`) for every load-bearing claim, so each is traceable. `sift read <alias>` prints the entity's Aleph `url:` — use it for `[open](<url>)` links where a reader will want the source.
-- **Write as you go, never batched at the end.** A fact only in your context is lost when the session ends.
+- **Note as you go, never batched at the end.** A fact only in your context is lost when the session ends.
 - Surfaced another lead worth its own pass? `sift queue "<lead>"` — a later session picks it up. It confirms each add (or says it's already queued); `sift queue --list` shows the worklist. Queue each lead once and trust it — no need to re-add or check the file.
 
 ## Aleph quirks

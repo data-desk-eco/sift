@@ -281,19 +281,21 @@ struct AutoCommand: SiftSubcommand {
                 \(topic)
 
             Search, read what matters, and pivot with `similar` / `expand` / \
-            `hubs` to follow the trail. Write your findings up AS YOU GO into \
-            `\(segment.path)` — your segment of the final report. The moment a \
-            document establishes something — a party, an account, an asset, a \
-            payment or an ownership/control link — append a sentence or two in \
+            `hubs` to follow the trail. Record findings AS YOU GO with \
+            `sift note "<finding>"` — one call per fact, which appends it to \
+            your segment of the final report. The moment a document \
+            establishes something — a party, an account, an asset, a payment \
+            or an ownership/control link — `sift note` a sentence or two in \
             neutral, wire-service prose, citing the source alias (`r4`) inline \
-            so every claim stays traceable. Don't batch this to the end. Open \
-            the section with a `## ` heading naming the lead. Every document \
-            you open with `-f` must leave something behind in the segment — if \
-            it wouldn't, you didn't need the full read. A session that searches \
-            and reads but writes nothing has produced nothing, however much you \
-            learned. If a document points to another lead worth its own pass, \
-            add it with `sift queue "<lead>"`. Stop when this lead is exhausted \
-            or the deadline nears.
+            so every claim stays traceable. Lead with a `sift note "## <lead>"` \
+            heading naming the lead. Don't batch this to the end and don't \
+            hand-edit the file — `sift note` is one call and it can't be lost \
+            to the deadline. Every document you open with `-f` must leave a \
+            note behind — if it wouldn't, you didn't need the full read. A \
+            session that searches and reads but notes nothing has produced \
+            nothing, however much you learned. If a document points to another \
+            lead worth its own pass, add it with `sift queue "<lead>"`. Stop \
+            when this lead is exhausted or the deadline nears.
             """
         return p
     }
