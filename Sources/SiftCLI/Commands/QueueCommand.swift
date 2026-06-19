@@ -9,7 +9,8 @@ import SiftCore
 struct QueueCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "queue",
-        abstract: "Add a topic to this run's worklist for a later session."
+        abstract: "Add a topic to this run's worklist for a later session.",
+        shouldDisplay: false
     )
 
     @Argument(help: "the lead to investigate later")

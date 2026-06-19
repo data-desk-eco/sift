@@ -12,7 +12,8 @@ import SiftCore
 struct NoteCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "note",
-        abstract: "Append a finding to this topic's segment of the report."
+        abstract: "Append a finding to this topic's segment of the report.",
+        shouldDisplay: false
     )
 
     @Argument(help: "the finding, in neutral prose, citing source aliases inline")

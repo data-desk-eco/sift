@@ -31,12 +31,6 @@ MEMORY SUBCOMMANDS:
   time                    Show remaining time and pacing for the current
                           session.
 
-LEADS SUBCOMMANDS:
-  queue                   Add a topic to this run's worklist for a later
-                          session.
-  note                    Append a finding to this topic's segment of the
-                          report.
-
 SETUP SUBCOMMANDS:
   init                    One-time setup: vault, Aleph credentials, LLM
                           backend, project.
