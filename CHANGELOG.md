@@ -4,43 +4,44 @@ All notable changes to sift land here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.3] — 2026-06-19
 
-Reworked `sift auto` from a single long-running agent into a
-**topic sweep**, and stripped the scaffolding that supported the old
-model.
+Reworked `sift auto` from a single long-running agent into a bash-driven
+**lead sweep**, and stripped the scaffolding that supported the old model.
 
 ### Changed
-- `sift auto BRIEF` now runs three phases — **plan** (an agent turns a
-  freeform brief into a `topics.txt` worklist), **sweep** (one fresh,
-  bounded pi session per topic, so the local model never drags a prior
-  topic's context forward — the slowdown that made long runs unusable on
-  a laptop), and **report** (a final agent stitches the per-topic
-  segments into `report.md`, reviewing for overlap and contradictions).
-  Re-running resumes from `topics.txt`.
-- Every few topics a consolidation pass writes `digest.md`, fed forward
-  into later prompts as cross-topic memory.
-- Per-topic agents now write their findings up as a markdown segment
-  under `segments/` (one file per lead), citing the source alias for
-  every claim, instead of recording structured FollowTheMoney entities.
-  The prompt and the bundled `SKILL.md` / `AGENTS.md` were slimmed to
-  that core loop, and the report-writing style rules moved into the
-  final phase's prompt instead of the always-loaded system prompt.
-- llama-server is recycled at the start of each session and reaped when
-  the run ends.
+- `sift auto BRIEF` is now a synchronous plan → sweep → report run
+  orchestrated by a bundled `orchestrate.sh`. **Plan** turns the brief
+  into a `leads.txt` worklist via `sift queue`; **sweep** spawns one
+  fresh `pi --no-session` session per lead — the new process per lead is
+  the entire context-management strategy, so the local model never drags
+  a prior lead's context forward (the slowdown that made long runs
+  unusable on a laptop); **report** stitches the per-lead segments into
+  `report.md`. Re-running resumes by segment existence.
+- Per-lead agents write their findings up as markdown segments under
+  `segments/` (one append per fact via `sift note`), citing the source
+  alias for every claim, instead of recording FollowTheMoney entities.
+  The prompts and bundled `SKILL.md` / `AGENTS.md` were slimmed to that
+  core loop; report-style rules live in the final phase's prompt.
+- `llama-server` is reused if already healthy on the port (skipping a
+  multi-second model reload, including across `^C`'d runs) and reaped on
+  a clean finish.
 
 ### Added
-- `sift queue "<lead>"` — any agent appends freshly surfaced leads to
-  the worklist for a later session to pick up; the planner uses it too.
+- `sift queue "<lead>"` — any agent appends freshly surfaced leads to the
+  worklist for a later session to pick up; the planner uses it too.
+- `sift note "<prose>"` — appends a fact to the current lead's segment.
+- `sift render` — turns pi's JSON event stream into readable stdout lines
+  (used to pipe each phase's output to the terminal).
 
 ### Removed
-- The FollowTheMoney findings store and the `sift entity` command
-  family (`findings.db`, `FindingsStore`, `Ftm`). The report is the sole
+- The FollowTheMoney findings store and the `sift entity` command family
+  (`findings.db`, `FindingsStore`, `Ftm`). The report is the sole
   deliverable now; nothing consumed the structured store downstream.
 - The SwiftUI menu-bar app and its App Intent.
 - The detached `_daemon` re-exec, `.sift-run.json` sidecars, the active
-  lead, and the `lead` / `status` / `logs` / `stop` commands. Runs are
-  foreground now; ^C stops a sweep.
+  lead, the in-Swift agent loop, and the `lead` / `status` / `logs` /
+  `stop` commands. Runs are foreground now; ^C stops a sweep.
 
 ## [0.1.0] — 2026-05-06
 

@@ -32,12 +32,9 @@ removed; it earned nothing the terminal didn't already give.
   research/
     aleph.sqlite                      ← shared cache (entities, aliases, edges)
     <run>/                            ← one dir per `sift auto` brief
-      topics.txt                      ← the worklist (run state)
-      segments/<slug>.md              ← one lead's write-up (per topic)
-      digest.md                       ← periodic consolidation, fed forward
+      leads.txt                       ← the worklist (run state)
+      segments/<slug>-<hash>.md       ← one lead's write-up (one file per lead)
       report.md                       ← final write-up, stitched from segments
-      pi.stderr.log                   ← raw pi stderr (rotated)
-      .pi-sessions/<phase>/           ← pi's per-phase conversation history
 ```
 
 Two clear separations:
@@ -51,58 +48,62 @@ Two clear separations:
 
 ## The sweep: plan → sweep → report
 
-`sift auto BRIEF` is the headline command. It's a synchronous loop —
-no daemon, no detachment, no sidecar (all removed). The local model
-slows badly once a context passes a few tens of thousands of tokens, so
-the design goal is simple: never let one agent's context grow without
-bound. The run does that by giving every unit of work a fresh,
-short-lived agent and keeping the accumulated state on disk instead of
-in the context window.
+`sift auto BRIEF` is the headline command. It's a synchronous run —
+no daemon, no detachment, no sidecar, no in-Swift agent loop (all
+removed). The local model slows badly once a context passes a few tens
+of thousands of tokens, so the design goal is simple: never let one
+agent's context grow without bound. The run does that by giving every
+unit of work a fresh `pi` *process* and keeping the accumulated state on
+disk instead of in the context window — the new process per lead **is**
+the entire context-management strategy (no compaction, no deadline, no
+digest, no salvage).
 
-The flow (`Sources/SiftCLI/Commands/Auto.swift` — every phase is one
-`PiRunner.prepare` + `PiRunner.drivePi`, a fresh pi context with a
-distinct `legSubdir`):
+`Sources/SiftCLI/Commands/Auto.swift` is a thin launcher: it unlocks the
+vault, calls `PiRunner.prepare` (start llama, configure the backend,
+build the system prompt, assemble the env), then `exec`s the bundled
+`Resources/orchestrate.sh <run-dir> <brief>` with `PI_BIN` / `SIFT_SKILL`
+/ `SIFT_SYSTEM_PROMPT` set and the executable dir on `PATH` (so the
+agent's own `sift …` resolves). The script spawns one fresh
+`pi --no-session -p --mode json` session per phase and per lead, each
+piped through `sift render` — a hidden command that turns pi's JSON
+event stream into readable stdout lines via `EventStream`.
 
 ```
 user types `sift auto sanctions.md`
        │
        ▼
-  ensure vault unlocked; run dir = <vault>/research/<brief-basename>/
+  Auto.swift: unlock vault, PiRunner.prepare, exec orchestrate.sh
+  run dir = <vault>/research/<brief-basename>/
        │
        ▼
-  plan (if topics.txt absent)   one agent reads the brief and queues a
-                                worklist via `sift queue` → topics.txt
+  (0) plan (if leads.txt absent)  one agent reads the brief and queues a
+                                  worklist via `sift queue` → leads.txt
        │
        ▼
-  while Worklist.next(at: topics.txt):                ← first un-marked line
-    PiRunner.prepare    starts llama-server (recycling any stale one),
-                        writes pi config + system prompt; legSubdir =
-                        t<n>-<slug> → a fresh pi context per topic
-    PiRunner.drivePi    spawns pi with the topic prompt + --mode json;
-                        EventStream renders events to stderr (live)
-    Worklist.markDone   prefixes the line with `✓` (re-reads first, so
-                        topics the agent queued mid-run survive)
-    every 3 topics:     a consolidation pass writes digest.md, which is
-                        prepended to later topics' prompts
+  (1) sweep: for each pending lead in leads.txt
+        fresh `pi … | sift render`   a new process per lead — independent
+                                     context; searches, records facts with
+                                     `sift note`, queues new leads
+        done when segments/<slug>-<hash>.md exists   (loop dedups/resumes
+                                     by segment existence; an empty lead
+                                     gets an honest stub so it's not retried)
        │
        ▼
-  report                a final agent stitches the segments into report.md
+  (2) report   a final session stitches the segments into report.md
        │
        ▼
-  LlamaServer.stopLocalIfIdle    reap the model when the run ends
+  Auto.execute: LlamaServer.stopLocal()   reap the model on a clean finish
 ```
 
-`topics.txt` is the entire mutable run state. A line is pending unless
+`leads.txt` is the entire mutable run state. A line is pending unless
 it's blank, a `#` comment, or already `✓`-marked. Any agent grows the
-sweep by calling `sift queue "<lead>"`, which appends to the file named
-in `$SIFT_TOPIC_LIST` (`Sources/SiftCore/Worklist.swift`). `segments/`,
-`digest.md`, and `report.md` live in the run dir and are shared across
-the run; each topic writes its own segment, so there are no concurrent
-writers — one pi runs at a time, and the orchestrator only touches the
-worklist between sessions. Per-topic agents only search and write prose,
-citing source aliases inline; the report-writing style rules live in
-`Auto.reportPrompt`, off the
-always-loaded system prompt.
+sweep by calling `sift queue "<lead>"`, which appends to the worklist
+(`Sources/SiftCore/Worklist.swift`). Per-lead agents only search and
+write prose, citing source aliases inline; one pi runs at a time, so
+there are no concurrent writers. The per-phase prompts and their
+wire-service style rules live in `orchestrate.sh`, off the always-loaded
+system prompt. There is no findings / FtM-entity store — `report.md` is
+the sole deliverable.
 
 ## Alias stability
 
@@ -125,7 +126,7 @@ when the agent starts) lists *only* the agent-safe commands:
 
 - **Agent surface:** `search`, `read`, `expand`, `browse`, `tree`,
   `similar`, `hubs`, `sources`, `recall`, `sql`, `cache`, `time`,
-  `report`, `entity`, `queue`.
+  `report`, `note`, `queue`.
 - **Off-limits to the agent:** `init`, `vault *`, `backend *`,
   `project *`, `auto`. Touching these from inside a sweep would prompt
   for the vault passphrase or fork another sweep.

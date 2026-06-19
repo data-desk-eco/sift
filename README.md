@@ -27,9 +27,15 @@ MEMORY SUBCOMMANDS:
   recall                  Summarise what's in the local cache.
   sql                     Read-only SQL against the cache DB.
   cache                   Inspect or prune the local response cache.
-  report                  Print or render a lead's report.md.
+  report                  Print a lead's report.md.
   time                    Show remaining time and pacing for the current
                           session.
+
+LEADS SUBCOMMANDS:
+  queue                   Add a topic to this run's worklist for a later
+                          session.
+  note                    Append a finding to this topic's segment of the
+                          report.
 
 SETUP SUBCOMMANDS:
   init                    One-time setup: vault, Aleph credentials, LLM
@@ -40,8 +46,8 @@ SETUP SUBCOMMANDS:
                           agent's system prompt.
 
 AUTO SUBCOMMANDS:
-  auto                    Sweep a list of topics through the collection, one
-                          agent per topic.
+  auto                    Plan a worklist from a brief, then sweep it through
+                          the collection.
 ```
 
 The Aleph and memory subcommands are the working surface. Each one takes a query or an alias and prints results to stdout; results from one command (`r5`, `d3491`, …) feed straight into the next. Aliases are stable across sessions on the same vault, so `r5` resolves to the same entity tomorrow. Responses are cached locally, so re-running the same call is free.
@@ -52,8 +58,8 @@ The Aleph and memory subcommands are the working surface. Each one takes a query
 
 The same tools can be driven by an LLM. `sift auto BRIEF` takes a brief — a list of topics, or freeform markdown instructions — and runs three phases:
 
-1. **Plan** — an agent reads the brief and breaks it into a worklist of concrete leads (`topics.txt`).
-2. **Sweep** — for each lead, a fresh, short-lived agent searches, reads, and pivots through the collection and writes up what it finds as a markdown segment, citing the source document for every claim. Every few leads a consolidation pass distils progress into a digest that's fed forward; an agent that surfaces a new lead appends it with `sift queue`, so the sweep grows as it goes.
+1. **Plan** — an agent reads the brief and breaks it into a worklist of concrete leads (`leads.txt`).
+2. **Sweep** — for each lead, a fresh, short-lived agent searches, reads, and pivots through the collection and writes up what it finds as a markdown segment, citing the source document for every claim. An agent that surfaces a new lead appends it with `sift queue`, so the sweep grows as it goes.
 3. **Report** — a final agent stitches the segments into `report.md`, reviewing for overlap and contradictions as it goes.
 
 ```bash
@@ -65,10 +71,9 @@ securities restrictions, and dealings with designated banks
 EOF
 
 sift auto sanctions.md           # plan → sweep → report
-sift auto -t 30m sanctions.md    # 30 minutes per lead
 ```
 
-Each lead gets its own bounded context, so the local model never bogs down dragging one investigation's history into the next — the reason the sweep beats a single long-running agent on a laptop. `topics.txt` is the run's state: open it mid-run and you see what's done (`✓`), what's pending, and what's been discovered. Re-running resumes where it left off.
+Each lead gets its own bounded context, so the local model never bogs down dragging one investigation's history into the next — the reason the sweep beats a single long-running agent on a laptop. `leads.txt` is the run's state: open it mid-run and you see what's done (`✓`), what's pending, and what's been discovered. Re-running resumes where it left off.
 
 Every claim in the report carries the alias of the document it came from, and `report.md` ends with a sources table linking each one straight back to its Aleph page — so the write-up stands on its own and every line is traceable.
 
@@ -81,7 +86,7 @@ brew install --cask data-desk-eco/tap/sift
 
 sift init                              # vault, Aleph creds, LLM backend
 sift search "acme corp"                # use the tools directly, or:
-sift auto topics.txt                   # let the agent sweep a worklist
+sift auto leads.txt                    # let the agent sweep a worklist
 ```
 
 `sift init` creates an encrypted sparseimage at `~/.sift/.vault.sparseimage` and asks for a passphrase. The passphrase is prompted on first use after each reboot and never persisted — losing it is unrecoverable. Aleph keys, the response cache, and every report live inside the vault.

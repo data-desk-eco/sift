@@ -8,7 +8,7 @@ Swift Testing 0.12 — every cooperative dispatch thread blocks on
 `DispatchSemaphore.wait` inside its URLSession callback path.
 
 `swift test --no-parallel` and `make test` (which already passes
-`--no-parallel`) complete the full 161-test suite in ~200 ms. CI uses
+`--no-parallel`) complete the full 138-test suite in ~200 ms. CI uses
 `--no-parallel` too, so this doesn't gate releases — but `swift test` is
 the obvious thing to type and it should not hang.
 

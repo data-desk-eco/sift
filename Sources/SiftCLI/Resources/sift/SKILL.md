@@ -11,9 +11,8 @@ Investigate inside an [Aleph](https://aleph.occrp.org) or [OpenAleph](https://op
 
 The vault mounts at `$VAULT_MOUNT`. Under `research/` is the shared `aleph.sqlite` (alias + entity cache, shared across every session on the vault) and one directory per run holding:
 
-- `topics.txt` — the worklist of leads for this run
+- `leads.txt` — the worklist of leads for this run
 - `segments/` — one markdown file per lead; you write yours up as you go (path in `$SIFT_SEGMENT`)
-- `digest.md` — periodic consolidation, prepended to your prompt
 - `report.md` — the final write-up, stitched from the segments
 
 You're already running in this run directory, and every path sift needs is in the environment — just call `sift …` directly; never `cd`. Aleph creds are already in `$ALEPH_URL` / `$ALEPH_API_KEY` — never open `secrets.json` yourself. You are one session in a sweep: you get a single lead (in your first message); investigate it and write up what you find. The setup/run commands (`init`, `vault`, `backend`, `project`, `auto`) are the operator's — never call them.
@@ -52,7 +51,7 @@ Flags belong to specific commands — there are no universal ones. `--limit` / `
 
 ## Writing it up
 
-Record findings with `sift note "<finding>"` — one call per fact, which appends it to the markdown segment at `$SIFT_SEGMENT`, your share of the final report. Don't hand-edit the file: `sift note` is a single append that can't be lost to the deadline. Lead with `sift note "## <lead>"` to title your section, then add to it as you go:
+Record findings with `sift note "<finding>"` — one call per fact, which appends it to the markdown segment at `$SIFT_SEGMENT`, your share of the final report. Don't hand-edit the file: `sift note` is a single append, so nothing is lost if your session ends early. Lead with `sift note "## <lead>"` to title your section, then add to it as you go:
 
 - **Neutral, wire-service prose.** State what the documents show; don't editorialise or hype. For structured data (parties, dates, amounts), pass a whole markdown table as one note.
 - **Cite the source alias inline** (`r512`) for every load-bearing claim, so each is traceable. `sift read <alias>` prints the entity's Aleph `url:` — use it for `[open](<url>)` links where a reader will want the source.
