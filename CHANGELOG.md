@@ -4,6 +4,15 @@ All notable changes to sift land here. Format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] — 2026-06-19
+
+### Changed
+- `sift queue` and `sift note` are hidden from `sift --help` — they're
+  plumbing for the sweep (`orchestrate.sh`) and the agent (documented in
+  the bundled `SKILL.md`), not commands a human types, so the human CLI
+  surface no longer advertises them (same treatment as the hidden
+  `render`). Both still work when called directly.
+
 ## [0.1.3] — 2026-06-19
 
 Reworked `sift auto` from a single long-running agent into a bash-driven
