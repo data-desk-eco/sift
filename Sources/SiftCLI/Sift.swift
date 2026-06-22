@@ -13,6 +13,7 @@ struct SiftRoot: AsyncParsableCommand {
             CommandGroup(name: "Aleph", subcommands: [
                 SearchCommand.self,
                 ReadCommand.self,
+                DownloadCommand.self,
                 SourcesCommand.self,
                 HubsCommand.self,
                 SimilarCommand.self,

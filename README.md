@@ -1,6 +1,6 @@
 # sift
 
-A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/). It exposes the Aleph collection as a small set of command-line tools — search, read, expand links, browse folders, find name variants — and keeps credentials and research products in an encrypted vault.
+A native macOS tool for investigating subjects in [Aleph](https://aleph.occrp.org) or [OpenAleph](https://openaleph.org/). It exposes the Aleph collection as a small set of command-line tools — search, read, download files, expand links, browse folders, find name variants — and keeps credentials and research products in an encrypted vault.
 
 ## The tools
 
@@ -13,6 +13,8 @@ USAGE: sift <subcommand>
 ALEPH SUBCOMMANDS:
   search                  Search the collection for hits.
   read                    Pull the full content of an entity by alias.
+  download                Save a document's file to <research>/files/ for local
+                          inspection.
   sources                 List Aleph collections visible to your API key.
   hubs                    Top emitters / recipients / mentions for entities
                           matching a query.

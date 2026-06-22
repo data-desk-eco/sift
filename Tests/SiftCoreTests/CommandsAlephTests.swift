@@ -246,6 +246,55 @@ import Testing
     }
 }
 
+// MARK: - sift download
+
+@Suite(.serialized) struct DownloadCommandTests {
+
+    let scope = StubScope()
+
+    private func seed(_ store: Store) throws {
+        try store.remember(
+            eid: "doc-1", schema: "Document", caption: nil, name: nil,
+            properties: nil, collectionId: nil, server: nil
+        )
+        _ = try store.assignAlias("doc-1")
+    }
+
+    @Test func savesFileAlongsideDB() async throws {
+        StubURLProtocol.enqueueJSON("""
+            {"id":"doc-1","schema":"Document",
+             "properties":{"fileName":["contract.docx"]},
+             "links":{"file":"https://aleph.example.org/api/2/entities/doc-1.docx"}}
+            """)
+        StubURLProtocol.enqueue(.init(status: 200, headers: [:], body: Data("DOCXBYTES".utf8)))
+        let (store, dir) = try tempStore(label: "download")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try seed(store)
+        let client = try stubbedClient()
+
+        let out = try await runDownload(
+            client: client, store: store, input: DownloadInput(alias: "r1")
+        )
+        let saved = dir.appending(path: "files").appending(path: "r1-contract.docx")
+        #expect(out.contains(saved.path))
+        #expect(FileManager.default.fileExists(atPath: saved.path))
+        #expect(try String(contentsOf: saved, encoding: .utf8) == "DOCXBYTES")
+    }
+
+    @Test func errorsWhenNoFileLink() async throws {
+        StubURLProtocol.enqueueJSON(#"{"id":"doc-1","schema":"Folder","properties":{},"links":{}}"#)
+        let (store, dir) = try tempStore(label: "download")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try seed(store)
+        let client = try stubbedClient()
+        await #expect(throws: SiftError.self) {
+            _ = try await runDownload(
+                client: client, store: store, input: DownloadInput(alias: "r1")
+            )
+        }
+    }
+}
+
 // MARK: - sift expand
 
 @Suite(.serialized) struct ExpandCommandTests {

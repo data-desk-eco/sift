@@ -14,6 +14,9 @@ public actor AlephClient {
 
     private let apiKey: String
     private let session: URLSession
+    /// Headerless twin of `session` (same protocol stack, no baked-in auth)
+    /// for downloading file links — see `download(from:to:)`.
+    private let downloadSession: URLSession
     private let timeout: TimeInterval
     private let retryPolicy: RetryPolicy
 
@@ -79,6 +82,11 @@ public actor AlephClient {
             "Accept": "application/json",
         ]
         self.session = URLSession(configuration: config)
+
+        let dlConfig = URLSessionConfiguration.ephemeral
+        dlConfig.protocolClasses = config.protocolClasses
+        dlConfig.timeoutIntervalForRequest = max(timeout, 120)
+        self.downloadSession = URLSession(configuration: dlConfig)
     }
 
     /// Strip trailing slash; auto-append `/api/2` if no `/api/<digits>` path is set.
@@ -194,6 +202,33 @@ public actor AlephClient {
             "network error: \(lastError?.localizedDescription ?? "exhausted retries")",
             suggestion: "check connectivity and Aleph URL"
         )
+    }
+
+    /// Stream a document's file to a local path. The link is the `file`
+    /// entry from an entity's `links` dict, which may be a presigned archive
+    /// URL on a third party (GCS/S3) — so the Aleph API key rides along ONLY
+    /// when the link is on the Aleph host, never leaking it to (or tripping
+    /// the single-auth-mechanism rule of) the storage backend. Uses a plain
+    /// session: `self.session` bakes the key into every request. Returns the
+    /// byte count written.
+    public func download(from urlString: String, to destination: URL) async throws -> Int {
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { throw SiftError("not a downloadable URL: \(urlString)") }
+
+        var request = URLRequest(url: url)
+        if url.host?.lowercased() == URL(string: baseURL)?.host?.lowercased() {
+            request.setValue("ApiKey \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        let (temp, response) = try await downloadSession.download(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode < 400 else {
+            throw SiftError("download failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0))")
+        }
+        let fm = FileManager.default
+        try? fm.removeItem(at: destination)
+        try fm.moveItem(at: temp, to: destination)
+        return ((try? fm.attributesOfItem(atPath: destination.path))?[.size] as? Int) ?? 0
     }
 
     /// Parse `Retry-After` header (RFC 7231 — seconds, or HTTP-date).

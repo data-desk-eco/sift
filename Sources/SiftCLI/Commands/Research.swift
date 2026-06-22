@@ -69,6 +69,20 @@ struct ReadCommand: SiftSubcommand {
     }
 }
 
+struct DownloadCommand: SiftSubcommand {
+    static let configuration = CommandConfiguration(
+        commandName: "download",
+        abstract: "Save a document's file to <research>/files/ for local inspection."
+    )
+    @Argument var alias: String
+
+    func execute() async throws {
+        let store = try openSessionStore()
+        let client = try Sift.makeAlephClient()
+        emit(try await runDownload(client: client, store: store, input: DownloadInput(alias: alias)))
+    }
+}
+
 struct SourcesCommand: SiftSubcommand {
     static let configuration = CommandConfiguration(
         commandName: "sources", abstract: "List Aleph collections visible to your API key."
